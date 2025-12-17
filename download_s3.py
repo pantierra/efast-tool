@@ -59,6 +59,7 @@ times = netCDF4.num2date(nc.variables['t'][:], nc.variables['t'].units)
 x_coords = nc.variables['x'][:]
 y_coords = nc.variables['y'][:]
 band_vars = sorted([v for v in nc.variables.keys() if v.startswith('B') and v[1:].isdigit()])
+band_names = [list(bands.keys())[openeo_bands.index(b)] for b in band_vars]
 
 transform = from_bounds(
     float(x_coords.min()), float(y_coords.min()),
@@ -66,13 +67,17 @@ transform = from_bounds(
     len(x_coords), len(y_coords)
 )
 
+date_counts = {}
 for t_idx, time_val in enumerate(times):
-    date_str = time_val.strftime("%Y%m%dT%H%M%S") if isinstance(time_val, datetime) else netCDF4.num2date(nc.variables['t'][t_idx], nc.variables['t'].units).strftime("%Y%m%dT%H%M%S")
+    dt = time_val if isinstance(time_val, datetime) else netCDF4.num2date(nc.variables['t'][t_idx], nc.variables['t'].units)
+    date_str = dt.strftime("%Y%m%d")
+    increment = date_counts.get(date_str, 0)
+    date_counts[date_str] = increment + 1
     
     band_data = [nc.variables[b][t_idx, :, :] for b in band_vars]
     stacked = np.stack(band_data, axis=0)
     
-    output_path = output_dir / f"S3_OLCI__{date_str}.tif"
+    output_path = output_dir / f"{date_str}_{increment}.geotiff"
     with rasterio.open(
         output_path, 'w',
         driver='GTiff', height=len(y_coords), width=len(x_coords),
@@ -80,6 +85,8 @@ for t_idx, time_val in enumerate(times):
         transform=transform, compress='lzw'
     ) as dst:
         dst.write(stacked)
+        for i, band_name in enumerate(band_names, 1):
+            dst.set_band_description(i, band_name)
     print(f"Saved: {output_path}")
 
 nc.close()
