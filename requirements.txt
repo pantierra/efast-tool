@@ -1,3 +1,8 @@
 pystac-client
 rasterio
+openeo
+python-dotenv
+netCDF4
+numpy
+requests
 

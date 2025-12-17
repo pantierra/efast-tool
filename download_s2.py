@@ -8,7 +8,7 @@ datetime_range = "2024-01-01/2024-01-03"
 lon, lat = 11.320308, 47.116171
 bbox_size = 0.009
 bbox = [lon - bbox_size/2, lat - bbox_size/2, lon + bbox_size/2, lat + bbox_size/2]
-bands = {"B02": "blue", "B03": "green", "B04": "red", "B8A": "nir08"}
+bands = {"B02": "blue", "B03": "green", "B04": "red", "B8A": "nir"}
 output_dir = "data/innsbruck/2024/s2/"
 os.makedirs(output_dir, exist_ok=True)
 
