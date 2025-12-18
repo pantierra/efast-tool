@@ -1,0 +1,132 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          25.0743,
+          35.3045
+        ]
+      },
+      "properties": {
+        "country": "",
+        "seasons": {
+          "2024": {}
+        },
+        "elevation": 68,
+        "description": "FORTH Heraklion Greece",
+        "sitename": "forthgr",
+        "ndvi_selected": true,
+        "vegetation_type": "Agriculture"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          11.320308,
+          47.116171
+        ]
+      },
+      "properties": {
+        "country": "",
+        "seasons": {
+          "2020": {},
+          "2024": {}
+        },
+        "elevation": 972,
+        "description": "Neustift Field Site, Stubai Valley, Tyrol, Austria",
+        "sitename": "innsbruck",
+        "ndvi_selected": true,
+        "vegetation_type": "Grassland"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          24.3688,
+          58.5633
+        ]
+      },
+      "properties": {
+        "country": "",
+        "seasons": {
+          "2024": {}
+        },
+        "elevation": 3,
+        "description": "Abandoned peat extraction area, Estonia",
+        "sitename": "pitsalu",
+        "ndvi_selected": true,
+        "vegetation_type": "Wetland"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          19.7673,
+          64.2437
+        ]
+      },
+      "properties": {
+        "country": "",
+        "seasons": {
+          "2023": {}
+        },
+        "elevation": 224,
+        "description": "SITES Svartberget Research Station, Vindeln, Sweden",
+        "sitename": "vindeln2",
+        "ndvi_selected": true,
+        "vegetation_type": "Deciduous Broadleaf"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -6.0033,
+          36.7455
+        ]
+      },
+      "properties": {
+        "country": "",
+        "seasons": {
+          "2024": {}
+        },
+        "elevation": 56,
+        "description": "Sun flower plot, Jerez, Spain",
+        "sitename": "sunflowerjerez1",
+        "ndvi_selected": true,
+        "vegetation_type": "Agriculture"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          26.9837,
+          42.6558
+        ]
+      },
+      "properties": {
+        "country": "",
+        "seasons": {
+          "2024": {}
+        },
+        "elevation": 262,
+        "description": "Institute of Agriculture in Karnobat (selection fields)",
+        "sitename": "institutekarnobat",
+        "ndvi_selected": true,
+        "vegetation_type": "Agriculture"
+      }
+    }
+  ]
+}
