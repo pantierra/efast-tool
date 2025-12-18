@@ -5,4 +5,5 @@ python-dotenv
 netCDF4
 numpy
 requests
-
+ruff
+pre-commit
