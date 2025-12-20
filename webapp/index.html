@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>NDVI Viewer</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/geotiff@2.0.7/dist-browser/geotiff.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/proj4@2.9.0/dist/proj4.js"></script>
+    <style>
+        body { margin: 20px; font-family: sans-serif; }
+        .container { max-width: 1400px; margin: 0 auto; }
+        .slider-container { margin: 20px 0; }
+        #dateSlider { width: 100%; }
+        #dateDisplay { text-align: center; margin: 10px 0; font-size: 18px; }
+        .maps { display: flex; gap: 20px; }
+        .map-container { flex: 1; }
+        .map-container h3 { margin: 10px 0; text-align: center; }
+        .timeseries { width: 100%; height: 120px; border: 1px solid #ccc; margin-bottom: 10px; }
+        .map { height: 500px; border: 1px solid #ccc; }
+        .leaflet-image-layer { image-rendering: pixelated; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="slider-container">
+            <input type="range" id="dateSlider" min="0" max="365" value="0">
+            <div id="dateDisplay">2024-01-01</div>
+        </div>
+        <div class="maps">
+            <div class="map-container">
+                <h3>S2</h3>
+                <canvas id="s2timeseries" class="timeseries"></canvas>
+                <div id="s2map" class="map"></div>
+            </div>
+            <div class="map-container">
+                <h3>S3</h3>
+                <canvas id="s3timeseries" class="timeseries"></canvas>
+                <div id="s3map" class="map"></div>
+            </div>
+        </div>
+    </div>
+    <script>
+        proj4.defs("EPSG:32632", "+proj=utm +zone=32 +datum=WGS84 +units=m +no_defs");
+        proj4.defs("EPSG:4326", "+proj=longlat +datum=WGS84 +no_defs");
+        
+        const start = new Date(2024, 0, 1);
+        const slider = document.getElementById("dateSlider");
+        const dateDisplay = document.getElementById("dateDisplay");
+        const osmUrl = "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png";
+        const osmOpts = { attribution: "OpenStreetMap" };
+        const maps = {
+            s2: L.map("s2map").setView([47.27, 11.39], 12).addLayer(L.tileLayer(osmUrl, osmOpts)),
+            s3: L.map("s3map").setView([47.27, 11.39], 12).addLayer(L.tileLayer(osmUrl, osmOpts))
+        };
+        const overlays = { s2: null, s3: null };
+        let timeseries = { s2: [], s3: [] };
+        
+        async function loadTimeseries() {
+            const [s2, s3] = await Promise.all([
+                fetch("../data/innsbruck/2024/ndvi/s2/timeseries.json").then(r => r.json()),
+                fetch("../data/innsbruck/2024/ndvi/s3/timeseries.json").then(r => r.json())
+            ]);
+            timeseries = { s2, s3 };
+            drawTimeseries();
+        }
+        
+        function drawTimeseries() {
+            const currentDate = dateFromDays(parseInt(slider.value));
+            for (const source of ["s2", "s3"]) {
+                const canvas = document.getElementById(`${source}timeseries`);
+                const ctx = canvas.getContext("2d");
+                canvas.width = canvas.offsetWidth;
+                canvas.height = 120;
+                const w = canvas.width, h = canvas.height;
+                const pad = 30;
+                const plotW = w - pad * 2, plotH = h - pad * 2;
+                
+                ctx.clearRect(0, 0, w, h);
+                const data = timeseries[source].filter(t => t.ndvi !== null);
+                if (!data.length) continue;
+                
+                const dates = data.map(t => new Date(t.date));
+                const minDate = new Date(Math.min(...dates));
+                const maxDate = new Date(Math.max(...dates));
+                const dateRange = maxDate - minDate;
+                
+                const ndvi = data.map(t => t.ndvi);
+                const minNdvi = Math.min(...ndvi);
+                const maxNdvi = Math.max(...ndvi);
+                const ndviRange = maxNdvi - minNdvi;
+                
+                const x = (d) => pad + ((new Date(d) - minDate) / dateRange) * plotW;
+                const y = (v) => pad + plotH - ((v - minNdvi) / ndviRange) * plotH;
+                
+                ctx.strokeStyle = "#ccc";
+                ctx.beginPath();
+                ctx.moveTo(pad, pad);
+                ctx.lineTo(pad, pad + plotH);
+                ctx.lineTo(pad + plotW, pad + plotH);
+                ctx.stroke();
+                
+                ctx.fillStyle = "#000";
+                ctx.font = "9px sans-serif";
+                ctx.fillText(minNdvi.toFixed(2), 2, pad + plotH + 10);
+                ctx.fillText(maxNdvi.toFixed(2), 2, pad + 3);
+                
+                ctx.strokeStyle = source === "s2" ? "#0066ff" : "#ff6600";
+                ctx.beginPath();
+                let first = true;
+                for (const t of data) {
+                    const px = x(t.date), py = y(t.ndvi);
+                    if (first) { ctx.moveTo(px, py); first = false; }
+                    else ctx.lineTo(px, py);
+                }
+                ctx.stroke();
+                
+                const xPos = x(currentDate);
+                ctx.strokeStyle = "#f00";
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(xPos, pad);
+                ctx.lineTo(xPos, pad + plotH);
+                ctx.stroke();
+            }
+        }
+        
+        async function findFile(dateStr, source) {
+            const target = new Date(dateStr);
+            for (let offset = 0; offset < 15; offset++) {
+                for (const dir of [0, -1, 1]) {
+                    const d = new Date(target);
+                    d.setDate(d.getDate() + offset * dir);
+                    const date = d.toISOString().split("T")[0].replace(/-/g, "");
+                    for (let i = 0; i < 3; i++) {
+                        const filename = `${date}_${i}.geotiff`;
+                        try {
+                            const res = await fetch(`../data/innsbruck/2024/${source}/${filename}`);
+                            if (res.ok) return filename;
+                        } catch {}
+                    }
+                }
+            }
+            return null;
+        }
+        
+        function transformBounds(bbox, fromCRS) {
+            const [sw, ne] = [proj4(fromCRS, "EPSG:4326", [bbox[0], bbox[1]]), proj4(fromCRS, "EPSG:4326", [bbox[2], bbox[3]])];
+            return [[sw[1], sw[0]], [ne[1], ne[0]]];
+        }
+        
+        async function loadGeotiff(source, filename) {
+            const tiff = await GeoTIFF.fromArrayBuffer(await (await fetch(`../data/innsbruck/2024/${source}/${filename}`)).arrayBuffer());
+            const image = await tiff.getImage();
+            const rasters = await image.readRasters();
+            const width = image.getWidth();
+            const height = image.getHeight();
+            const bbox = image.getBoundingBox();
+            const geoKeys = image.getGeoKeys();
+            const crsCode = geoKeys.ProjectedCSTypeGeoKey ? `EPSG:${geoKeys.ProjectedCSTypeGeoKey}` : 
+                          geoKeys.GeographicTypeGeoKey !== 4326 ? `EPSG:${geoKeys.GeographicTypeGeoKey}` : "EPSG:4326";
+            
+            const bandIndices = [0, 1, 2];
+            const [blue, green, red] = bandIndices.map(i => Array.from(rasters[i]));
+            
+            const normalize = (arr) => {
+                let min = Infinity, max = -Infinity;
+                for (const v of arr) if (!isNaN(v) && v > 0) { min = Math.min(min, v); max = Math.max(max, v); }
+                return arr.map(v => Math.max(0, Math.min(255, ((v - min) / (max - min || 1)) * 255)));
+            };
+            
+            const [rNorm, gNorm, bNorm] = [red, green, blue].map(normalize);
+            
+            const canvas = Object.assign(document.createElement("canvas"), { width, height });
+            const ctx = canvas.getContext("2d");
+            ctx.imageSmoothingEnabled = false;
+            const imgData = ctx.createImageData(width, height);
+            
+            for (let i = 0; i < rNorm.length; i++) {
+                const idx = i * 4;
+                if (rNorm[i] === 0 && gNorm[i] === 0 && bNorm[i] === 0) {
+                    imgData.data[idx + 3] = 0;
+                } else {
+                    imgData.data[idx] = rNorm[i];
+                    imgData.data[idx + 1] = gNorm[i];
+                    imgData.data[idx + 2] = bNorm[i];
+                    imgData.data[idx + 3] = 255;
+                }
+            }
+            ctx.putImageData(imgData, 0, 0);
+            
+            const bounds = crsCode === "EPSG:4326" ? [[bbox[1], bbox[0]], [bbox[3], bbox[2]]] : transformBounds(bbox, crsCode);
+            if (overlays[source]) maps[source].removeLayer(overlays[source]);
+            overlays[source] = L.imageOverlay(canvas.toDataURL(), bounds, { opacity: 0.7 }).addTo(maps[source]);
+            maps[source].fitBounds(bounds);
+        }
+        
+        const fmtDate = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+        const dateFromDays = (days) => fmtDate(new Date(start.getTime() + days * 86400000));
+        const daysFromDate = (dateStr) => {
+            const [y, m, d] = dateStr.split("-").map(Number);
+            return Math.floor((new Date(y, m - 1, d) - start) / 86400000);
+        };
+        
+        async function updateImages() {
+            const date = dateFromDays(parseInt(slider.value));
+            dateDisplay.textContent = date;
+            history.replaceState({}, "", `?date=${date}`);
+            drawTimeseries();
+            for (const source of ["s2", "s3"]) {
+                const filename = await findFile(date, source);
+                if (filename) {
+                    try {
+                        await loadGeotiff(source, filename);
+                    } catch (e) {
+                        console.error(`Error loading ${source}:`, e);
+                    }
+                }
+            }
+        }
+        
+        const urlDate = new URLSearchParams(location.search).get("date");
+        if (urlDate) slider.value = daysFromDate(urlDate);
+        slider.addEventListener("input", updateImages);
+        loadTimeseries().then(updateImages);
+    </script>
+</body>
+</html>
