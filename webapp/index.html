@@ -7,15 +7,17 @@
     <script src="https://cdn.jsdelivr.net/npm/geotiff@2.0.7/dist-browser/geotiff.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/proj4@2.9.0/dist/proj4.js"></script>
     <style>
-        body { margin: 20px; font-family: sans-serif; }
-        .container { max-width: 1400px; margin: 0 auto; }
-        .slider-container { margin: 20px 0; }
+        body { margin: 0; font-family: sans-serif; }
+        .slider-container { position: sticky; top: 0; background: white; padding: 20px; z-index: 1000; border-bottom: 1px solid #ccc; }
+        .container { max-width: 1400px; margin: 0 auto; padding: 20px; }
         #dateSlider { width: 100%; }
         #dateDisplay { text-align: center; margin: 10px 0; font-size: 18px; }
         .maps { display: flex; gap: 20px; }
         .map-container { flex: 1; }
         .map-container h3 { margin: 10px 0; text-align: center; }
+        .timeseries-label { font-size: 12px; margin-bottom: 5px; color: #666; }
         .timeseries { width: 100%; height: 120px; border: 1px solid #ccc; margin-bottom: 10px; }
+        .map-label { font-size: 12px; margin-bottom: 5px; color: #666; }
         .map { height: 500px; border: 1px solid #ccc; }
         .leaflet-image-layer { image-rendering: pixelated; }
     </style>
@@ -29,13 +31,21 @@
         <div class="maps">
             <div class="map-container">
                 <h3>S2</h3>
+                <div class="timeseries-label">NDVI Timeseries</div>
                 <canvas id="s2timeseries" class="timeseries"></canvas>
+                <div class="map-label">RGB Imagery</div>
                 <div id="s2map" class="map"></div>
+                <div class="map-label">NDVI Imagery</div>
+                <div id="s2ndvimap" class="map"></div>
             </div>
             <div class="map-container">
                 <h3>S3</h3>
+                <div class="timeseries-label">NDVI Timeseries</div>
                 <canvas id="s3timeseries" class="timeseries"></canvas>
+                <div class="map-label">RGB Imagery</div>
                 <div id="s3map" class="map"></div>
+                <div class="map-label">NDVI Imagery</div>
+                <div id="s3ndvimap" class="map"></div>
             </div>
         </div>
     </div>
@@ -47,12 +57,18 @@
         const slider = document.getElementById("dateSlider");
         const dateDisplay = document.getElementById("dateDisplay");
         const osmUrl = "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png";
-        const osmOpts = { attribution: "OpenStreetMap" };
+        const osmOpts = { attribution: "OpenStreetMap", opacity: 0.4 };
+        const mapOpts = { zoomControl: false };
         const maps = {
-            s2: L.map("s2map").setView([47.27, 11.39], 12).addLayer(L.tileLayer(osmUrl, osmOpts)),
-            s3: L.map("s3map").setView([47.27, 11.39], 12).addLayer(L.tileLayer(osmUrl, osmOpts))
+            s2: L.map("s2map", mapOpts).setView([47.27, 11.39], 12).addLayer(L.tileLayer(osmUrl, osmOpts)),
+            s3: L.map("s3map", mapOpts).setView([47.27, 11.39], 12).addLayer(L.tileLayer(osmUrl, osmOpts))
+        };
+        const ndvimaps = {
+            s2: L.map("s2ndvimap", mapOpts).setView([47.27, 11.39], 12).addLayer(L.tileLayer(osmUrl, osmOpts)),
+            s3: L.map("s3ndvimap", mapOpts).setView([47.27, 11.39], 12).addLayer(L.tileLayer(osmUrl, osmOpts))
         };
         const overlays = { s2: null, s3: null };
+        const ndviOverlays = { s2: null, s3: null };
         let timeseries = { s2: [], s3: [] };
         
         async function loadTimeseries() {
@@ -121,6 +137,16 @@
                 ctx.moveTo(xPos, pad);
                 ctx.lineTo(xPos, pad + plotH);
                 ctx.stroke();
+                
+                const closest = data.reduce((c, t) => 
+                    Math.abs(new Date(t.date) - new Date(currentDate)) < Math.abs(new Date(c.date) - new Date(currentDate)) ? t : c
+                );
+                if (closest && closest.ndvi !== null) {
+                    const yPos = y(closest.ndvi);
+                    ctx.fillStyle = "#f00";
+                    ctx.font = "bold 10px sans-serif";
+                    ctx.fillText(closest.ndvi.toFixed(3), xPos + 5, yPos - 5);
+                }
             }
         }
         
@@ -190,8 +216,46 @@
             
             const bounds = crsCode === "EPSG:4326" ? [[bbox[1], bbox[0]], [bbox[3], bbox[2]]] : transformBounds(bbox, crsCode);
             if (overlays[source]) maps[source].removeLayer(overlays[source]);
-            overlays[source] = L.imageOverlay(canvas.toDataURL(), bounds, { opacity: 0.7 }).addTo(maps[source]);
+            overlays[source] = L.imageOverlay(canvas.toDataURL(), bounds, { opacity: 0.95 }).addTo(maps[source]);
             maps[source].fitBounds(bounds);
+        }
+        
+        async function loadNDVI(source, filename) {
+            const tiff = await GeoTIFF.fromArrayBuffer(await (await fetch(`../data/innsbruck/2024/ndvi/${source}/${filename}`)).arrayBuffer());
+            const image = await tiff.getImage();
+            const data = Array.from((await image.readRasters())[0]);
+            const width = image.getWidth();
+            const height = image.getHeight();
+            const bbox = image.getBoundingBox();
+            const geoKeys = image.getGeoKeys();
+            const crsCode = geoKeys.ProjectedCSTypeGeoKey ? `EPSG:${geoKeys.ProjectedCSTypeGeoKey}` : 
+                          geoKeys.GeographicTypeGeoKey !== 4326 ? `EPSG:${geoKeys.GeographicTypeGeoKey}` : "EPSG:4326";
+            
+            let minVal = Infinity, maxVal = -Infinity;
+            for (const v of data) if (!isNaN(v) && v !== 0) { minVal = Math.min(minVal, v); maxVal = Math.max(maxVal, v); }
+            
+            const canvas = Object.assign(document.createElement("canvas"), { width, height });
+            const ctx = canvas.getContext("2d");
+            ctx.imageSmoothingEnabled = false;
+            const imgData = ctx.createImageData(width, height);
+            
+            for (let i = 0; i < data.length; i++) {
+                const val = data[i];
+                const idx = i * 4;
+                if (val === 0 || isNaN(val)) {
+                    imgData.data[idx + 3] = 0;
+                } else {
+                    const n = ((val - minVal) / (maxVal - minVal || 1)) * 255;
+                    imgData.data[idx] = imgData.data[idx + 1] = imgData.data[idx + 2] = n;
+                    imgData.data[idx + 3] = 255;
+                }
+            }
+            ctx.putImageData(imgData, 0, 0);
+            
+            const bounds = crsCode === "EPSG:4326" ? [[bbox[1], bbox[0]], [bbox[3], bbox[2]]] : transformBounds(bbox, crsCode);
+            if (ndviOverlays[source]) ndvimaps[source].removeLayer(ndviOverlays[source]);
+            ndviOverlays[source] = L.imageOverlay(canvas.toDataURL(), bounds, { opacity: 0.95 }).addTo(ndvimaps[source]);
+            ndvimaps[source].fitBounds(bounds);
         }
         
         const fmtDate = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -200,6 +264,25 @@
             const [y, m, d] = dateStr.split("-").map(Number);
             return Math.floor((new Date(y, m - 1, d) - start) / 86400000);
         };
+        
+        async function findNDVIFile(dateStr, source) {
+            const target = new Date(dateStr);
+            for (let offset = 0; offset < 15; offset++) {
+                for (const dir of [0, -1, 1]) {
+                    const d = new Date(target);
+                    d.setDate(d.getDate() + offset * dir);
+                    const date = d.toISOString().split("T")[0].replace(/-/g, "");
+                    for (let i = 0; i < 3; i++) {
+                        const filename = `${date}_${i}.geotiff`;
+                        try {
+                            const res = await fetch(`../data/innsbruck/2024/ndvi/${source}/${filename}`);
+                            if (res.ok) return filename;
+                        } catch {}
+                    }
+                }
+            }
+            return null;
+        }
         
         async function updateImages() {
             const date = dateFromDays(parseInt(slider.value));
@@ -213,6 +296,14 @@
                         await loadGeotiff(source, filename);
                     } catch (e) {
                         console.error(`Error loading ${source}:`, e);
+                    }
+                }
+                const ndviFilename = await findNDVIFile(date, source);
+                if (ndviFilename) {
+                    try {
+                        await loadNDVI(source, ndviFilename);
+                    } catch (e) {
+                        console.error(`Error loading NDVI ${source}:`, e);
                     }
                 }
             }
