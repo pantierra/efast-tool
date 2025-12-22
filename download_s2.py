@@ -5,7 +5,6 @@ import requests
 from rasterio.warp import transform_geom
 from rasterio.windows import from_bounds, transform as window_transform
 from pystac_client import Client
-from pathlib import Path
 
 
 def download_s2(year, site_position, site_name, date_range=None):
@@ -129,7 +128,9 @@ def download_s2(year, site_position, site_name, date_range=None):
                     # If not found, try averaging all bands
                     if viewing_angle is None:
                         angles = []
-                        for angle_elem in root.findall(".//Mean_Viewing_Incidence_Angle"):
+                        for angle_elem in root.findall(
+                            ".//Mean_Viewing_Incidence_Angle"
+                        ):
                             zenith_elem = angle_elem.find("ZENITH_ANGLE")
                             if zenith_elem is not None:
                                 angles.append(abs(float(zenith_elem.text)))
@@ -145,7 +146,11 @@ def download_s2(year, site_position, site_name, date_range=None):
                 if viewing_angle is not None:
                     dst.update_tags(VIEWING_ZENITH_ANGLE=viewing_angle)
 
-            print(f"[S2] Saved: {filepath} (viewing angle: {viewing_angle:.2f}°)" if viewing_angle else f"[S2] Saved: {filepath}")
+            print(
+                f"[S2] Saved: {filepath} (viewing angle: {viewing_angle:.2f}°)"
+                if viewing_angle
+                else f"[S2] Saved: {filepath}"
+            )
         else:
             print(f"[S2] Skipping {date}_{increment} (missing bands)")
 

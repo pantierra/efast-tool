@@ -1,4 +1,3 @@
-import os
 import json
 import numpy as np
 import rasterio
@@ -50,17 +49,17 @@ def generate_ndvi(year, site_position, site_name):
                     dst.set_band_description(1, "NDVI")
 
             print(f"[NDVI-{source.upper()}] Saved: {output_file}")
-        
+
         print(f"[NDVI-{source.upper()}] Completed")
 
 
 def create_ndvi_timeseries(year, site_position, site_name):
     for source in ["s2", "s3"]:
         output_dir = Path(f"data/{site_name}/{year}/ndvi/{source}/")
-        
+
         print(f"[NDVI-{source.upper()}] Creating timeseries.json...")
         timeseries = []
-        
+
         ndvi_files = sorted(output_dir.glob("*.geotiff"))
         for ndvi_file in ndvi_files:
             filename = ndvi_file.name
@@ -69,7 +68,7 @@ def create_ndvi_timeseries(year, site_position, site_name):
                 date = datetime.strptime(date_str, "%Y%m%d").isoformat()
             except ValueError:
                 date = date_str
-            
+
             ndvi_value = None
             try:
                 with rasterio.open(ndvi_file) as src:
@@ -81,17 +80,17 @@ def create_ndvi_timeseries(year, site_position, site_name):
                         if value != 0 and not np.isnan(value):
                             ndvi_value = value
             except Exception as e:
-                print(f"[NDVI-{source.upper()}] Warning: Could not sample {filename}: {e}")
-            
-            timeseries.append({
-                "date": date,
-                "filename": filename,
-                "ndvi": ndvi_value
-            })
-        
+                print(
+                    f"[NDVI-{source.upper()}] Warning: Could not sample {filename}: {e}"
+                )
+
+            timeseries.append({"date": date, "filename": filename, "ndvi": ndvi_value})
+
         timeseries.sort(key=lambda x: x["date"])
         timeseries_file = output_dir / "timeseries.json"
         with open(timeseries_file, "w") as f:
             json.dump(timeseries, f, indent=2)
-        
-        print(f"[NDVI-{source.upper()}] Saved: {timeseries_file} ({len(timeseries)} entries)")
+
+        print(
+            f"[NDVI-{source.upper()}] Saved: {timeseries_file} ({len(timeseries)} entries)"
+        )
