@@ -1,13 +1,16 @@
 import os
 import rasterio
+import xml.etree.ElementTree as ET
+import requests
 from rasterio.warp import transform_geom
 from rasterio.windows import from_bounds, transform as window_transform
 from pystac_client import Client
+from pathlib import Path
 
 
-def download_s2(year, site_position, site_name):
+def download_s2(year, site_position, site_name, date_range=None):
     lat, lon = site_position
-    datetime_range = f"{year}-01-01/{year}-12-31"
+    datetime_range = date_range or f"{year}-01-01/{year}-12-31"
     output_dir = f"data/{site_name}/{year}/s2/"
 
     print(f"[S2] Starting download: {site_name} ({lat:.6f}, {lon:.6f}), {year}")
@@ -107,11 +110,42 @@ def download_s2(year, site_position, site_name):
         if profile and len(band_data) == len(bands):
             stacked = [band_data[i] for i in sorted(band_data.keys())]
             band_names = [list(bands.keys())[i] for i in sorted(band_data.keys())]
+
+            # Extract viewing angle from granule metadata XML
+            viewing_angle = None
+            if "granule_metadata" in item.assets:
+                try:
+                    xml_url = item.assets["granule_metadata"].href
+                    xml_resp = requests.get(xml_url, timeout=10)
+                    xml_resp.raise_for_status()
+                    root = ET.fromstring(xml_resp.content)
+                    # Find Mean_Viewing_Incidence_Angle ZENITH_ANGLE
+                    for angle_elem in root.findall(".//Mean_Viewing_Incidence_Angle"):
+                        if angle_elem.get("bandId") == "0":  # Use first band or average
+                            zenith_elem = angle_elem.find("ZENITH_ANGLE")
+                            if zenith_elem is not None:
+                                viewing_angle = abs(float(zenith_elem.text))
+                                break
+                    # If not found, try averaging all bands
+                    if viewing_angle is None:
+                        angles = []
+                        for angle_elem in root.findall(".//Mean_Viewing_Incidence_Angle"):
+                            zenith_elem = angle_elem.find("ZENITH_ANGLE")
+                            if zenith_elem is not None:
+                                angles.append(abs(float(zenith_elem.text)))
+                        if angles:
+                            viewing_angle = sum(angles) / len(angles)
+                except Exception as e:
+                    print(f"[S2] Warning: Could not extract viewing angle: {e}")
+
             with rasterio.open(filepath, "w", **profile) as dst:
                 for i, data in enumerate(stacked, 1):
                     dst.write(data, i)
                     dst.set_band_description(i, band_names[i - 1])
-            print(f"[S2] Saved: {filepath}")
+                if viewing_angle is not None:
+                    dst.update_tags(VIEWING_ZENITH_ANGLE=viewing_angle)
+
+            print(f"[S2] Saved: {filepath} (viewing angle: {viewing_angle:.2f}°)" if viewing_angle else f"[S2] Saved: {filepath}")
         else:
             print(f"[S2] Skipping {date}_{increment} (missing bands)")
 
