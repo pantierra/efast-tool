@@ -1,6 +1,7 @@
 from download_s2 import download_s2
 from download_s3 import download_s3
 from ndvi import generate_ndvi, create_ndvi_timeseries
+from clouds import detect_clouds
 
 year = 2024
 site_position = (47.116171, 11.320308)
@@ -11,7 +12,11 @@ site_name = "innsbruck"
 # download_s3(year, site_position, site_name)
 # print("All downloads completed")
 
-print(f"Generating NDVI for {site_name}, {year}")
+# print(f"Generating NDVI for {site_name}, {year}")
 # generate_ndvi(year, site_position, site_name)
-create_ndvi_timeseries(year, site_position, site_name)
-print("All NDVI generation completed")
+# create_ndvi_timeseries(year, site_position, site_name)
+# print("All NDVI generation completed")
+
+print(f"Detecting clouds for {site_name}, {year}")
+detect_clouds(year, site_name)
+print("Cloud detection completed")
