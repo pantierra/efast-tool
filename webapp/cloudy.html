@@ -18,7 +18,6 @@
         .timeseries-label { font-size: 12px; margin-bottom: 5px; color: #666; }
         .timeseries { width: 100%; height: 120px; border: 1px solid #ccc; margin-bottom: 10px; }
         .map-label { font-size: 12px; margin-bottom: 5px; color: #666; }
-        .map-date { font-size: 11px; margin-top: 5px; color: #999; }
         .map { height: 500px; border: 1px solid #ccc; }
         .leaflet-image-layer { image-rendering: pixelated; }
     </style>
@@ -28,10 +27,6 @@
         <div class="slider-container">
             <input type="range" id="dateSlider" min="0" max="365" value="0">
             <div id="dateDisplay">2024-01-01</div>
-            <label style="display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 10px;">
-                <input type="checkbox" id="showClouds" checked>
-                <span>Show cloud-covered data</span>
-            </label>
         </div>
         <div class="maps">
             <div class="map-container">
@@ -39,32 +34,17 @@
                 <div class="timeseries-label">NDVI Timeseries</div>
                 <canvas id="s2timeseries" class="timeseries"></canvas>
                 <div class="map-label">RGB Imagery</div>
-                <div id="s2rgbdate" class="map-date"></div>
                 <div id="s2map" class="map"></div>
                 <div class="map-label">NDVI Imagery</div>
-                <div id="s2ndvidate" class="map-date"></div>
                 <div id="s2ndvimap" class="map"></div>
-            </div>
-            <div class="map-container">
-                <h3>Fusion</h3>
-                <div class="timeseries-label">NDVI Timeseries</div>
-                <canvas id="fusiontimeseries" class="timeseries"></canvas>
-                <div class="map-label">RGB Imagery</div>
-                <div id="fusionrgbdate" class="map-date"></div>
-                <div id="fusionmap" class="map"></div>
-                <div class="map-label">NDVI Imagery</div>
-                <div id="fusionndvidate" class="map-date"></div>
-                <div id="fusionndvimap" class="map"></div>
             </div>
             <div class="map-container">
                 <h3>S3</h3>
                 <div class="timeseries-label">NDVI Timeseries</div>
                 <canvas id="s3timeseries" class="timeseries"></canvas>
                 <div class="map-label">RGB Imagery</div>
-                <div id="s3rgbdate" class="map-date"></div>
                 <div id="s3map" class="map"></div>
                 <div class="map-label">NDVI Imagery</div>
-                <div id="s3ndvidate" class="map-date"></div>
                 <div id="s3ndvimap" class="map"></div>
             </div>
         </div>
@@ -81,35 +61,28 @@
         const mapOpts = { zoomControl: false };
         const maps = {
             s2: L.map("s2map", mapOpts).setView([47.27, 11.39], 12).addLayer(L.tileLayer(osmUrl, osmOpts)),
-            fusion: L.map("fusionmap", mapOpts).setView([47.27, 11.39], 12).addLayer(L.tileLayer(osmUrl, osmOpts)),
             s3: L.map("s3map", mapOpts).setView([47.27, 11.39], 12).addLayer(L.tileLayer(osmUrl, osmOpts))
         };
         const ndvimaps = {
             s2: L.map("s2ndvimap", mapOpts).setView([47.27, 11.39], 12).addLayer(L.tileLayer(osmUrl, osmOpts)),
-            fusion: L.map("fusionndvimap", mapOpts).setView([47.27, 11.39], 12).addLayer(L.tileLayer(osmUrl, osmOpts)),
             s3: L.map("s3ndvimap", mapOpts).setView([47.27, 11.39], 12).addLayer(L.tileLayer(osmUrl, osmOpts))
         };
-        const overlays = { s2: null, fusion: null, s3: null };
-        const ndviOverlays = { s2: null, fusion: null, s3: null };
-        let timeseries = { s2: [], fusion: [], s3: [] };
-        let clouds = { s2: new Set(), s3: new Set() };
-        const showCloudsCheckbox = document.getElementById("showClouds");
+        const overlays = { s2: null, s3: null };
+        const ndviOverlays = { s2: null, s3: null };
+        let timeseries = { s2: [], s3: [] };
         
         async function loadTimeseries() {
-            const [s2, fusion, s3, cloudData] = await Promise.all([
+            const [s2, s3] = await Promise.all([
                 fetch("../data/innsbruck/2024/ndvi/s2/timeseries.json").then(r => r.json()),
-                fetch("../data/innsbruck/2024/ndvi/fusion/timeseries.json").then(r => r.json()).catch(() => []),
-                fetch("../data/innsbruck/2024/ndvi/s3/timeseries.json").then(r => r.json()),
-                fetch("../data/innsbruck/2024/clouds.json").then(r => r.json()).catch(() => ({ s2: [], s3: [] }))
+                fetch("../data/innsbruck/2024/ndvi/s3/timeseries.json").then(r => r.json())
             ]);
-            timeseries = { s2, fusion, s3 };
-            clouds = { s2: new Set(cloudData.s2 || []), s3: new Set(cloudData.s3 || []) };
+            timeseries = { s2, s3 };
             drawTimeseries();
         }
         
         function drawTimeseries() {
             const currentDate = dateFromDays(parseInt(slider.value));
-            for (const source of ["s2", "fusion", "s3"]) {
+            for (const source of ["s2", "s3"]) {
                 const canvas = document.getElementById(`${source}timeseries`);
                 const ctx = canvas.getContext("2d");
                 canvas.width = canvas.offsetWidth;
@@ -119,10 +92,7 @@
                 const plotW = w - pad * 2, plotH = h - pad * 2;
                 
                 ctx.clearRect(0, 0, w, h);
-                let data = timeseries[source].filter(t => t.ndvi !== null);
-                if (!showCloudsCheckbox.checked && clouds[source]) {
-                    data = data.filter(t => !clouds[source].has(t.filename));
-                }
+                const data = timeseries[source].filter(t => t.ndvi !== null);
                 if (!data.length) continue;
                 
                 const dates = data.map(t => new Date(t.date));
@@ -150,7 +120,7 @@
                 ctx.fillText(minNdvi.toFixed(2), 2, pad + plotH + 10);
                 ctx.fillText(maxNdvi.toFixed(2), 2, pad + 3);
                 
-                ctx.strokeStyle = source === "s2" ? "#0066ff" : source === "fusion" ? "#00aa00" : "#ff6600";
+                ctx.strokeStyle = source === "s2" ? "#0066ff" : "#ff6600";
                 ctx.beginPath();
                 let first = true;
                 for (const t of data) {
@@ -187,21 +157,12 @@
                     const d = new Date(target);
                     d.setDate(d.getDate() + offset * dir);
                     const date = d.toISOString().split("T")[0].replace(/-/g, "");
-                    if (source === "fusion") {
-                        const filename = `REFL_${date}.tif`;
+                    for (let i = 0; i < 3; i++) {
+                        const filename = `${date}_${i}.geotiff`;
                         try {
-                            const res = await fetch(`../data/innsbruck/2024/efast/fusion/${filename}`);
+                            const res = await fetch(`../data/innsbruck/2024/${source}/${filename}`);
                             if (res.ok) return filename;
                         } catch {}
-                    } else {
-                        for (let i = 0; i < 3; i++) {
-                            const filename = `${date}_${i}.geotiff`;
-                            if (!showCloudsCheckbox.checked && clouds[source] && clouds[source].has(filename)) continue;
-                            try {
-                                const res = await fetch(`../data/innsbruck/2024/${source}/${filename}`);
-                                if (res.ok) return filename;
-                            } catch {}
-                        }
                     }
                 }
             }
@@ -214,8 +175,7 @@
         }
         
         async function loadGeotiff(source, filename) {
-            const path = source === "fusion" ? `../data/innsbruck/2024/efast/fusion/${filename}` : `../data/innsbruck/2024/${source}/${filename}`;
-            const tiff = await GeoTIFF.fromArrayBuffer(await (await fetch(path)).arrayBuffer());
+            const tiff = await GeoTIFF.fromArrayBuffer(await (await fetch(`../data/innsbruck/2024/${source}/${filename}`)).arrayBuffer());
             const image = await tiff.getImage();
             const rasters = await image.readRasters();
             const width = image.getWidth();
@@ -258,10 +218,6 @@
             if (overlays[source]) maps[source].removeLayer(overlays[source]);
             overlays[source] = L.imageOverlay(canvas.toDataURL(), bounds, { opacity: 0.95 }).addTo(maps[source]);
             maps[source].fitBounds(bounds);
-            
-            const dateStr = source === "fusion" ? filename.split("_")[1] : filename.split("_")[0];
-            const date = `${dateStr.slice(0,4)}-${dateStr.slice(4,6)}-${dateStr.slice(6,8)}`;
-            document.getElementById(`${source}rgbdate`).textContent = date;
         }
         
         async function loadNDVI(source, filename) {
@@ -300,10 +256,6 @@
             if (ndviOverlays[source]) ndvimaps[source].removeLayer(ndviOverlays[source]);
             ndviOverlays[source] = L.imageOverlay(canvas.toDataURL(), bounds, { opacity: 0.95 }).addTo(ndvimaps[source]);
             ndvimaps[source].fitBounds(bounds);
-            
-            const dateStr = source === "fusion" ? filename.split("_")[0] : filename.split("_")[0];
-            const date = `${dateStr.slice(0,4)}-${dateStr.slice(4,6)}-${dateStr.slice(6,8)}`;
-            document.getElementById(`${source}ndvidate`).textContent = date;
         }
         
         const fmtDate = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -320,21 +272,12 @@
                     const d = new Date(target);
                     d.setDate(d.getDate() + offset * dir);
                     const date = d.toISOString().split("T")[0].replace(/-/g, "");
-                    if (source === "fusion") {
-                        const filename = `${date}_ndvi.geotiff`;
+                    for (let i = 0; i < 3; i++) {
+                        const filename = `${date}_${i}.geotiff`;
                         try {
-                            const res = await fetch(`../data/innsbruck/2024/ndvi/fusion/${filename}`);
+                            const res = await fetch(`../data/innsbruck/2024/ndvi/${source}/${filename}`);
                             if (res.ok) return filename;
                         } catch {}
-                    } else {
-                        for (let i = 0; i < 3; i++) {
-                            const filename = `${date}_${i}.geotiff`;
-                            if (!showCloudsCheckbox.checked && clouds[source] && clouds[source].has(filename)) continue;
-                            try {
-                                const res = await fetch(`../data/innsbruck/2024/ndvi/${source}/${filename}`);
-                                if (res.ok) return filename;
-                            } catch {}
-                        }
                     }
                 }
             }
@@ -344,12 +287,9 @@
         async function updateImages() {
             const date = dateFromDays(parseInt(slider.value));
             dateDisplay.textContent = date;
-            const params = new URLSearchParams();
-            params.set("date", date);
-            if (!showCloudsCheckbox.checked) params.set("hideClouds", "1");
-            history.replaceState({}, "", `?${params}`);
+            history.replaceState({}, "", `?date=${date}`);
             drawTimeseries();
-            for (const source of ["s2", "fusion", "s3"]) {
+            for (const source of ["s2", "s3"]) {
                 const filename = await findFile(date, source);
                 if (filename) {
                     try {
@@ -369,12 +309,9 @@
             }
         }
         
-        const urlParams = new URLSearchParams(location.search);
-        const urlDate = urlParams.get("date");
+        const urlDate = new URLSearchParams(location.search).get("date");
         if (urlDate) slider.value = daysFromDate(urlDate);
-        if (urlParams.get("hideClouds") === "1") showCloudsCheckbox.checked = false;
         slider.addEventListener("input", updateImages);
-        showCloudsCheckbox.addEventListener("change", updateImages);
         loadTimeseries().then(updateImages);
     </script>
 </body>
