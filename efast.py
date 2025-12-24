@@ -206,29 +206,24 @@ def run_efast(year, site_position, site_name, date_range=None):
             current_date += timedelta(days=1)
             continue
 
-        if list(s2_output_dir.glob(f"*{date_str}*REFL.tif")) and list(
-            s3_output_dir.glob(f"composite_{date_str}.tif")
-        ):
-            try:
-                efast_fusion.fusion(
-                    current_date,
-                    s3_output_dir,
-                    s2_output_dir,
-                    fusion_output_dir,
-                    product="REFL",
-                    max_days=30,
-                    date_position=2,
-                    minimum_acquisition_importance=0.0,
-                    ratio=21,
-                )
-                if output_file.exists():
-                    print(f"[EFAST] Saved: {output_file}")
-                else:
-                    print(f"[EFAST] No output for {date_str}")
-            except Exception as e:
-                print(f"[EFAST] Error processing {date_str}: {e}")
-        else:
-            print(f"[EFAST] Skipping {date_str} (insufficient data)")
+        try:
+            efast_fusion.fusion(
+                current_date,
+                s3_output_dir,
+                s2_output_dir,
+                fusion_output_dir,
+                product="REFL",
+                max_days=30,
+                date_position=2,
+                minimum_acquisition_importance=0.0,
+                ratio=21,
+            )
+            if output_file.exists():
+                print(f"[EFAST] Saved: {output_file}")
+            else:
+                print(f"[EFAST] No output for {date_str} (insufficient nearby data)")
+        except Exception as e:
+            print(f"[EFAST] Error processing {date_str}: {e}")
 
         current_date += timedelta(days=1)
 
