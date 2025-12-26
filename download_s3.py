@@ -12,12 +12,12 @@ from rasterio.transform import from_bounds
 load_dotenv()
 
 
-def download_s3(year, site_position, site_name, date_range=None):
+def download_s3(season, site_position, site_name, date_range=None):
     lat, lon = site_position
-    datetime_range = date_range or f"{year}-01-01/{year}-12-31"
-    output_dir = Path(f"data/{site_name}/{year}/s3/")
+    datetime_range = date_range or f"{season}-01-01/{season}-12-31"
+    output_dir = Path(f"data/{site_name}/{season}/raw/s3/")
 
-    print(f"[S3] Starting download: {site_name} ({lat:.6f}, {lon:.6f}), {year}")
+    print(f"[S3] Starting download: {site_name} ({lat:.6f}, {lon:.6f}), {season}")
 
     bbox_size = 0.011
     bbox = [

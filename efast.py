@@ -43,11 +43,11 @@ else:
         )
 
 
-def prepare_s2(year, site_position, site_name, date_range=None):
-    s2_dir = Path(f"data/{site_name}/{year}/s2/")
-    s3_dir = Path(f"data/{site_name}/{year}/s3/")
-    s2_output_dir = Path(f"data/{site_name}/{year}/efast/s2/")
-    clouds_file = Path(f"data/{site_name}/{year}/clouds.json")
+def prepare_s2(season, site_position, site_name, date_range=None):
+    s2_dir = Path(f"data/{site_name}/{season}/raw/s2/")
+    s3_dir = Path(f"data/{site_name}/{season}/raw/s3/")
+    s2_output_dir = Path(f"data/{site_name}/{season}/prepared/s2/")
+    clouds_file = Path(f"data/{site_name}/{season}/clouds.json")
 
     clouds = {"s2": set(), "s3": set()}
     if clouds_file.exists():
@@ -159,10 +159,10 @@ def prepare_s2(year, site_position, site_name, date_range=None):
                     dst.write(distance_to_cloud_lr, 1)
 
 
-def prepare_s3(year, site_position, site_name, date_range=None):
-    s3_dir = Path(f"data/{site_name}/{year}/s3/")
-    s3_preprocessed_dir = Path(f"data/{site_name}/{year}/efast/s3/")
-    clouds_file = Path(f"data/{site_name}/{year}/clouds.json")
+def prepare_s3(season, site_position, site_name, date_range=None):
+    s3_dir = Path(f"data/{site_name}/{season}/raw/s3/")
+    s3_preprocessed_dir = Path(f"data/{site_name}/{season}/prepared/s3/")
+    clouds_file = Path(f"data/{site_name}/{season}/clouds.json")
 
     clouds = {"s3": set()}
     if clouds_file.exists():
@@ -180,18 +180,18 @@ def prepare_s3(year, site_position, site_name, date_range=None):
         shutil.copy2(s3_file, output_path)
 
 
-def run_efast(year, site_position, site_name, date_range=None):
+def run_efast(season, site_position, site_name, date_range=None):
     lat, lon = site_position
-    datetime_range = date_range or f"{year}-01-01/{year}-12-31"
+    datetime_range = date_range or f"{season}-01-01/{season}-12-31"
 
-    efast_base_dir = Path(f"data/{site_name}/{year}/efast/")
+    efast_base_dir = Path(f"data/{site_name}/{season}/prepared/")
     s2_output_dir = efast_base_dir / "s2"
     s3_output_dir = efast_base_dir / "s3"
     fusion_output_dir = efast_base_dir / "fusion"
 
     fusion_output_dir.mkdir(parents=True, exist_ok=True)
 
-    print(f"[EFAST] Starting fusion: {site_name} ({lat:.6f}, {lon:.6f}), {year}")
+    print(f"[EFAST] Starting fusion: {site_name} ({lat:.6f}, {lon:.6f}), {season}")
 
     start_date = datetime.strptime(datetime_range.split("/")[0], "%Y-%m-%d")
     end_date = datetime.strptime(datetime_range.split("/")[1], "%Y-%m-%d")

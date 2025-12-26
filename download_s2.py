@@ -7,12 +7,12 @@ from rasterio.windows import from_bounds, transform as window_transform
 from pystac_client import Client
 
 
-def download_s2(year, site_position, site_name, date_range=None):
+def download_s2(season, site_position, site_name, date_range=None):
     lat, lon = site_position
-    datetime_range = date_range or f"{year}-01-01/{year}-12-31"
-    output_dir = f"data/{site_name}/{year}/s2/"
+    datetime_range = date_range or f"{season}-01-01/{season}-12-31"
+    output_dir = f"data/{site_name}/{season}/raw/s2/"
 
-    print(f"[S2] Starting download: {site_name} ({lat:.6f}, {lon:.6f}), {year}")
+    print(f"[S2] Starting download: {site_name} ({lat:.6f}, {lon:.6f}), {season}")
 
     bbox_size = 0.011
     bbox = [

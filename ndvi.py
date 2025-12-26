@@ -51,7 +51,7 @@ def _create_timeseries_for_dir(output_dir, site_position, source_name):
                 lon, lat = site_position[1], site_position[0]
                 x, y = transform_coords("EPSG:4326", src.crs, [lon], [lat])
                 samples = list(src.sample([(x[0], y[0])]))
-                if samples and len(samples) > 0:
+                if samples:
                     value = float(samples[0][0])
                     if value != 0 and not np.isnan(value):
                         ndvi_value = value
@@ -68,10 +68,10 @@ def _create_timeseries_for_dir(output_dir, site_position, source_name):
     print(f"[NDVI-{source_name}] Saved: {timeseries_file} ({len(timeseries)} entries)")
 
 
-def generate_ndvi(year, site_position, site_name):
+def generate_ndvi_raw(season, site_position, site_name):
     for source in ["s2", "s3"]:
-        input_dir = Path(f"data/{site_name}/{year}/{source}/")
-        output_dir = Path(f"data/{site_name}/{year}/ndvi/{source}/")
+        input_dir = Path(f"data/{site_name}/{season}/raw/{source}/")
+        output_dir = Path(f"data/{site_name}/{season}/raw/ndvi/{source}/")
         output_dir.mkdir(parents=True, exist_ok=True)
 
         print(f"[NDVI-{source.upper()}] Processing {input_dir}...")
@@ -94,15 +94,46 @@ def generate_ndvi(year, site_position, site_name):
         print(f"[NDVI-{source.upper()}] Completed")
 
 
-def create_ndvi_timeseries(year, site_position, site_name):
+def create_ndvi_timeseries_raw(season, site_position, site_name):
     for source in ["s2", "s3"]:
-        output_dir = Path(f"data/{site_name}/{year}/ndvi/{source}/")
+        output_dir = Path(f"data/{site_name}/{season}/raw/ndvi/{source}/")
         _create_timeseries_for_dir(output_dir, site_position, source.upper())
 
 
-def generate_ndvi_fusion(year, site_position, site_name):
-    input_dir = Path(f"data/{site_name}/{year}/efast/fusion/")
-    output_dir = Path(f"data/{site_name}/{year}/ndvi/fusion/")
+def generate_ndvi_prepared(season, site_position, site_name):
+    for source in ["s2", "s3"]:
+        input_dir = Path(f"data/{site_name}/{season}/prepared/{source}/")
+        output_dir = Path(f"data/{site_name}/{season}/prepared/ndvi/{source}/")
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        print(f"[NDVI-PREPARED-{source.upper()}] Processing {input_dir}...")
+
+        geotiff_files = sorted(input_dir.glob("*.geotiff")) + sorted(input_dir.glob("*.tif"))
+        if not geotiff_files:
+            print(f"[NDVI-PREPARED-{source.upper()}] No files found")
+            continue
+
+        for geotiff_file in geotiff_files:
+            if geotiff_file.suffix == ".tif":
+                if "REFL" in geotiff_file.stem:
+                    date_str = geotiff_file.stem.split("_")[1]
+                    output_file = output_dir / f"{date_str}_ndvi.geotiff"
+                else:
+                    output_file = output_dir / geotiff_file.name.replace(".tif", ".geotiff")
+            else:
+                output_file = output_dir / geotiff_file.name
+
+            if output_file.exists():
+                print(f"[NDVI-PREPARED-{source.upper()}] Skipping {geotiff_file.name} (exists)")
+                continue
+
+            _calculate_and_write_ndvi(geotiff_file, output_file)
+            print(f"[NDVI-PREPARED-{source.upper()}] Saved: {output_file}")
+
+        print(f"[NDVI-PREPARED-{source.upper()}] Completed")
+
+    input_dir = Path(f"data/{site_name}/{season}/prepared/fusion/")
+    output_dir = Path(f"data/{site_name}/{season}/prepared/ndvi/fusion/")
     output_dir.mkdir(parents=True, exist_ok=True)
 
     print(f"[NDVI-FUSION] Processing {input_dir}...")
@@ -126,6 +157,10 @@ def generate_ndvi_fusion(year, site_position, site_name):
     print(f"[NDVI-FUSION] Completed")
 
 
-def create_ndvi_timeseries_fusion(year, site_position, site_name):
-    output_dir = Path(f"data/{site_name}/{year}/ndvi/fusion/")
+def create_ndvi_timeseries_prepared(season, site_position, site_name):
+    for source in ["s2", "s3"]:
+        output_dir = Path(f"data/{site_name}/{season}/prepared/ndvi/{source}/")
+        _create_timeseries_for_dir(output_dir, site_position, f"PREPARED-{source.upper()}")
+
+    output_dir = Path(f"data/{site_name}/{season}/prepared/ndvi/fusion/")
     _create_timeseries_for_dir(output_dir, site_position, "FUSION")

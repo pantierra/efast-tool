@@ -3,12 +3,12 @@ from pathlib import Path
 from datetime import datetime
 
 
-def detect_clouds(year, site_name):
-    output_file = Path(f"data/{site_name}/{year}/clouds.json")
+def detect_clouds(season, site_name):
+    output_file = Path(f"data/{site_name}/{season}/clouds.json")
     clouds = {"s2": [], "s3": []}
 
     for source in ["s2", "s3"]:
-        timeseries_file = Path(f"data/{site_name}/{year}/ndvi/{source}/timeseries.json")
+        timeseries_file = Path(f"data/{site_name}/{season}/raw/ndvi/{source}/timeseries.json")
         if not timeseries_file.exists():
             print(f"[CLOUDS-{source.upper()}] No timeseries.json found")
             continue
