@@ -2,13 +2,20 @@ import json
 from pathlib import Path
 from datetime import datetime
 
+WINDOW_DAYS = 14
+NDVI_THRESHOLD = 0.3
+NDVI_DELTA = 0.15
+MIN_WINDOW_SIZE = 3
+
 
 def detect_clouds(season, site_name):
     output_file = Path(f"data/{site_name}/{season}/clouds.json")
     clouds = {"s2": [], "s3": []}
 
     for source in ["s2", "s3"]:
-        timeseries_file = Path(f"data/{site_name}/{season}/raw/ndvi/{source}/timeseries.json")
+        timeseries_file = Path(
+            f"data/{site_name}/{season}/raw/ndvi/{source}/timeseries.json"
+        )
         if not timeseries_file.exists():
             print(f"[CLOUDS-{source.upper()}] No timeseries.json found")
             continue
@@ -21,22 +28,23 @@ def detect_clouds(season, site_name):
         entries = [
             (e, datetime.fromisoformat(e["date"].replace("Z", "+00:00")))
             for e in timeseries
-            if e["ndvi"] is not None
+            if e.get("ndvi") is not None
         ]
 
         for entry, entry_date in entries:
-            # Use 14-day window for seasonal context, require NDVI < 0.3 and >0.15 below max
             window_ndvi = [
-                e["ndvi"] for e, d in entries if abs((d - entry_date).days) <= 14
+                e["ndvi"]
+                for e, d in entries
+                if abs((d - entry_date).days) <= WINDOW_DAYS
             ]
 
-            if len(window_ndvi) < 3:
+            if len(window_ndvi) < MIN_WINDOW_SIZE:
                 continue
 
             max_ndvi = max(window_ndvi)
-            threshold = max_ndvi - 0.15
+            threshold = max_ndvi - NDVI_DELTA
 
-            if entry["ndvi"] < threshold and entry["ndvi"] < 0.3:
+            if entry["ndvi"] < threshold and entry["ndvi"] < NDVI_THRESHOLD:
                 clouds[source].append(entry["filename"])
 
         print(

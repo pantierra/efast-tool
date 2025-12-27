@@ -11,6 +11,66 @@ from rasterio.transform import from_bounds
 
 load_dotenv()
 
+BBOX_SIZE = 0.011
+
+
+def _get_bbox(lon, lat):
+    half = BBOX_SIZE / 2
+    return [lon - half, lat - half, lon + half, lat + half]
+
+
+def _process_netcdf(nc_file, output_dir, bands, openeo_bands):
+    with netCDF4.Dataset(str(nc_file), "r") as nc:
+        times = netCDF4.num2date(nc.variables["t"][:], nc.variables["t"].units)
+        x_coords = nc.variables["x"][:]
+        y_coords = nc.variables["y"][:]
+        band_vars = sorted(
+            [v for v in nc.variables.keys() if v.startswith("B") and v[1:].isdigit()]
+        )
+        band_names = [list(bands.keys())[openeo_bands.index(b)] for b in band_vars]
+
+        transform = from_bounds(
+            float(x_coords.min()),
+            float(y_coords.min()),
+            float(x_coords.max()),
+            float(y_coords.max()),
+            len(x_coords),
+            len(y_coords),
+        )
+
+        print(f"[S3] Found {len(times)} time steps")
+        date_counts = {}
+        for t_idx, time_val in enumerate(times):
+            dt = (
+                time_val
+                if isinstance(time_val, datetime)
+                else netCDF4.num2date(nc.variables["t"][t_idx], nc.variables["t"].units)
+            )
+            date_str = dt.strftime("%Y%m%d")
+            increment = date_counts.get(date_str, 0)
+            date_counts[date_str] = increment + 1
+
+            band_data = [nc.variables[b][t_idx, :, :] for b in band_vars]
+            stacked = np.stack(band_data, axis=0)
+
+            output_path = output_dir / f"{date_str}_{increment}.geotiff"
+            with rasterio.open(
+                output_path,
+                "w",
+                driver="GTiff",
+                height=len(y_coords),
+                width=len(x_coords),
+                count=len(band_data),
+                dtype=stacked.dtype,
+                crs="EPSG:32632",
+                transform=transform,
+                compress="lzw",
+            ) as dst:
+                dst.write(stacked)
+                for i, band_name in enumerate(band_names, 1):
+                    dst.set_band_description(i, band_name)
+            print(f"[S3] Saved: {output_path}")
+
 
 def download_s3(season, site_position, site_name, date_range=None):
     lat, lon = site_position
@@ -19,13 +79,7 @@ def download_s3(season, site_position, site_name, date_range=None):
 
     print(f"[S3] Starting download: {site_name} ({lat:.6f}, {lon:.6f}), {season}")
 
-    bbox_size = 0.011
-    bbox = [
-        lon - bbox_size / 2,
-        lat - bbox_size / 2,
-        lon + bbox_size / 2,
-        lat + bbox_size / 2,
-    ]
+    bbox = _get_bbox(lon, lat)
     bands = {
         "SDR_Oa04": "blue",
         "SDR_Oa06": "green",
@@ -81,57 +135,6 @@ def download_s3(season, site_position, site_name, date_range=None):
     datacube.download(str(output_file), format="NetCDF")
 
     print("[S3] Processing NetCDF...")
-    nc = netCDF4.Dataset(str(output_file), "r")
-    times = netCDF4.num2date(nc.variables["t"][:], nc.variables["t"].units)
-    x_coords = nc.variables["x"][:]
-    y_coords = nc.variables["y"][:]
-    band_vars = sorted(
-        [v for v in nc.variables.keys() if v.startswith("B") and v[1:].isdigit()]
-    )
-    band_names = [list(bands.keys())[openeo_bands.index(b)] for b in band_vars]
-
-    transform = from_bounds(
-        float(x_coords.min()),
-        float(y_coords.min()),
-        float(x_coords.max()),
-        float(y_coords.max()),
-        len(x_coords),
-        len(y_coords),
-    )
-
-    print(f"[S3] Found {len(times)} time steps")
-    date_counts = {}
-    for t_idx, time_val in enumerate(times):
-        dt = (
-            time_val
-            if isinstance(time_val, datetime)
-            else netCDF4.num2date(nc.variables["t"][t_idx], nc.variables["t"].units)
-        )
-        date_str = dt.strftime("%Y%m%d")
-        increment = date_counts.get(date_str, 0)
-        date_counts[date_str] = increment + 1
-
-        band_data = [nc.variables[b][t_idx, :, :] for b in band_vars]
-        stacked = np.stack(band_data, axis=0)
-
-        output_path = output_dir / f"{date_str}_{increment}.geotiff"
-        with rasterio.open(
-            output_path,
-            "w",
-            driver="GTiff",
-            height=len(y_coords),
-            width=len(x_coords),
-            count=len(band_data),
-            dtype=stacked.dtype,
-            crs="EPSG:32632",
-            transform=transform,
-            compress="lzw",
-        ) as dst:
-            dst.write(stacked)
-            for i, band_name in enumerate(band_names, 1):
-                dst.set_band_description(i, band_name)
-        print(f"[S3] Saved: {output_path}")
-
-    nc.close()
+    _process_netcdf(output_file, output_dir, bands, openeo_bands)
     os.remove(output_file)
     print("[S3] Completed")
