@@ -68,3 +68,6 @@ python3 -m http.server 8000
 
 Then open `http://localhost:8000/webapp` in your browser to visualize NDVI time series and compare S2, S3, and fusion outputs.
 
+## License
+
+This project is licensed under the GNU Affero General Public License v3.0 (AGPL-3.0). See the [LICENSE](LICENSE) file for details.
