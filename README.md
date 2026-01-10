@@ -57,6 +57,17 @@ data/
       clouds.json    # Cloud detection results
 ```
 
+### File Formats
+
+**Sentinel-2 (raw/s2/)**: Multi-band GeoTIFF
+- Bands: B02 (blue), B03 (green), B04 (red), B8A (nir)
+- Metadata: `VIEWING_ZENITH_ANGLE` tag (degrees)
+- Filename: `{YYYYMMDD}_{increment}.geotiff`
+
+**Sentinel-3 (raw/s3/)**: Multi-band GeoTIFF
+- Bands: SDR_Oa04 (blue), SDR_Oa06 (green), SDR_Oa08 (red), SDR_Oa17 (nir)
+- Filename: `{YYYYMMDD}_{increment}.geotiff`
+
 ## Web Viewer
 
 Run a local HTTP server to view the web interface:
