@@ -6,6 +6,8 @@ from datetime import datetime, timedelta
 import numpy as np
 import rasterio
 from rasterio.warp import Resampling
+from rasterio.vrt import WarpedVRT
+from rasterio import shutil as rio_shutil
 from scipy import ndimage
 
 RESOLUTION_RATIO = 21
@@ -155,20 +157,78 @@ def prepare_s2(season, site_position, site_name, date_range=None):
 
 def prepare_s3(season, site_position, site_name, date_range=None):
     s3_dir = Path(f"data/{site_name}/{season}/raw/s3/")
+    s2_prepared_dir = Path(f"data/{site_name}/{season}/prepared/s2/")
     s3_preprocessed_dir = Path(f"data/{site_name}/{season}/prepared/s3/")
     clouds_file = Path(f"data/{site_name}/{season}/clouds.json")
 
     clouds = _load_clouds(clouds_file)
-
     s3_preprocessed_dir.mkdir(parents=True, exist_ok=True)
+
+    # Get reference profile from S2 DIST_CLOUD file
+    dist_cloud_files = list(s2_prepared_dir.glob("*DIST_CLOUD.tif"))
+    if not dist_cloud_files:
+        raise ValueError("No S2 DIST_CLOUD files found. Run prepare_s2 first.")
+    
+    with rasterio.open(dist_cloud_files[0]) as src:
+        target_profile = src.profile
+
+    # Group S3 files by date
+    s3_by_date = {}
     for s3_file in s3_dir.glob("*.geotiff"):
         if s3_file.name in clouds["s3"]:
             continue
         date_str = s3_file.name.split("_")[0]
+        if date_str not in s3_by_date:
+            s3_by_date[date_str] = []
+        s3_by_date[date_str].append(s3_file)
+
+    # Process each date
+    for date_str, s3_files in s3_by_date.items():
         output_path = s3_preprocessed_dir / f"composite_{date_str}.tif"
         if output_path.exists():
             continue
-        shutil.copy2(s3_file, output_path)
+
+        if len(s3_files) == 1:
+            # Single file: reproject directly
+            with rasterio.open(s3_files[0]) as src:
+                vrt_options = {
+                    "transform": target_profile["transform"],
+                    "height": target_profile["height"],
+                    "width": target_profile["width"],
+                    "crs": target_profile["crs"],
+                    "resampling": Resampling.cubic,
+                }
+                with WarpedVRT(src, **vrt_options) as vrt:
+                    rio_shutil.copy(vrt, output_path, driver="GTiff")
+        else:
+            # Multiple files: create weighted composite
+            s3_stack = []
+            for s3_file in s3_files:
+                with rasterio.open(s3_file) as src:
+                    vrt_options = {
+                        "transform": target_profile["transform"],
+                        "height": target_profile["height"],
+                        "width": target_profile["width"],
+                        "crs": target_profile["crs"],
+                        "resampling": Resampling.cubic,
+                    }
+                    with WarpedVRT(src, **vrt_options) as vrt:
+                        data = vrt.read()
+                        # Remove abnormally high values (pixel-wise mean across bands)
+                        pixel_means = np.abs(np.nanmean(data, axis=0))
+                        mask = pixel_means >= 5
+                        data[:, mask] = np.nan
+                        s3_stack.append(data)
+            
+            s3_stack = np.array(s3_stack)
+            # Simple mean composite (can be enhanced with temporal weighting)
+            composite = np.nanmean(s3_stack, axis=0)
+            composite = composite.astype("float32")
+            
+            profile = target_profile.copy()
+            profile.update({"count": composite.shape[0], "dtype": "float32"})
+            with rasterio.open(output_path, "w", **profile) as dst:
+                dst.write(composite)
 
 
 def run_efast(season, site_position, site_name, date_range=None):
