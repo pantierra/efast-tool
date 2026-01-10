@@ -43,6 +43,8 @@ def _get_ndvi_value(ndvi_file, site_position):
                 value = float(samples[0][0])
                 if value != 0 and not np.isnan(value):
                     return value
+                # Return the raw value even if 0 or NaN for diagnostic purposes
+                return value
     except Exception:
         pass
     return None
@@ -63,6 +65,12 @@ def _create_timeseries_for_dir(output_dir, site_position, source_name):
         ndvi_value = _get_ndvi_value(ndvi_file, site_position)
         if ndvi_value is None:
             print(f"[NDVI-{source_name}] Warning: Could not sample {filename}")
+        elif ndvi_value == 0:
+            print(f"[NDVI-{source_name}] Warning: Could not sample {filename} (NoData)")
+            ndvi_value = None  # Set to None for timeseries
+        elif np.isnan(ndvi_value):
+            print(f"[NDVI-{source_name}] Warning: Could not sample {filename} (NaN)")
+            ndvi_value = None  # Set to None for timeseries
 
         timeseries.append({"date": date, "filename": filename, "ndvi": ndvi_value})
 
