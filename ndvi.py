@@ -94,6 +94,16 @@ def _process_ndvi_files(
         return
 
     for geotiff_file in geotiff_files:
+        # Check if file has enough bands (need at least 4 for RED and NIR)
+        try:
+            with rasterio.open(geotiff_file) as src:
+                if src.count < 4:
+                    print(f"[NDVI-{source_name}] Skipping {geotiff_file.name} (only {src.count} band(s), need 4+)")
+                    continue
+        except Exception as e:
+            print(f"[NDVI-{source_name}] Skipping {geotiff_file.name} (error reading: {e})")
+            continue
+
         output_file = output_dir / (
             output_namer(geotiff_file) if output_namer else geotiff_file.name
         )

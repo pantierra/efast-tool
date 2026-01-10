@@ -9,14 +9,17 @@ from rasterio.warp import Resampling
 from rasterio.vrt import WarpedVRT
 from rasterio import shutil as rio_shutil
 
-try:
-    import efast
-    from efast.s2_processing import distance_to_clouds
-    from efast.s3_processing import reproject_and_crop_s3
-except ImportError:
-    raise ImportError(
-        "efast package not found. Install with: pip install git+https://github.com/DHI-GRAS/efast.git"
-    )
+def _import_efast():
+    """Lazy import of efast to avoid import errors when not using efast functions."""
+    try:
+        import efast
+        from efast.s2_processing import distance_to_clouds
+        from efast.s3_processing import reproject_and_crop_s3
+        return efast, distance_to_clouds, reproject_and_crop_s3
+    except ImportError:
+        raise ImportError(
+            "efast package not found. Install with: pip install git+https://github.com/DHI-GRAS/efast.git"
+        )
 
 RESOLUTION_RATIO = 21
 
@@ -46,8 +49,8 @@ def _reproject_raster_to_target(src_path, dst_path, target_bounds, target_crs, w
         }
         with WarpedVRT(src, **vrt_options) as vrt:
             profile = vrt.profile.copy()
-            profile.update({"dtype": "float32", "nodata": 0})
-            rio_shutil.copy(vrt, dst_path, driver="GTiff", **profile)
+            profile.update({"dtype": "float32", "nodata": 0, "driver": "GTiff"})
+            rio_shutil.copy(vrt, dst_path, **profile)
 
 
 def prepare_s2(season, site_position, site_name, date_range=None):
@@ -88,6 +91,7 @@ def prepare_s2(season, site_position, site_name, date_range=None):
         _reproject_raster_to_target(temp_normalized, refl_dst, target_bounds, target_crs, s2_width, s2_height)
         temp_normalized.unlink()
 
+    _, distance_to_clouds, _ = _import_efast()
     distance_to_clouds(s2_output_dir, ratio=RESOLUTION_RATIO)
 
 
@@ -128,6 +132,7 @@ def prepare_s3(season, site_position, site_name, date_range=None):
             with rasterio.open(composite_path, "w", **profile) as dst:
                 dst.write(composite)
 
+    _, _, reproject_and_crop_s3 = _import_efast()
     reproject_and_crop_s3(temp_composite_dir, s2_prepared_dir, s3_preprocessed_dir)
     shutil.rmtree(temp_composite_dir)
 
