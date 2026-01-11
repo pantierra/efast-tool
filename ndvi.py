@@ -190,36 +190,35 @@ def _fusion_namer(f):
     return f"{date_str}_ndvi.geotiff"
 
 
-def generate_ndvi_prepared(season, site_position, site_name):
+def generate_ndvi_post_process(season, site_position, site_name):
     for source in ["s2", "s3"]:
-        input_dir = Path(f"data/{site_name}/{season}/prepared/{source}/")
-        output_dir = Path(f"data/{site_name}/{season}/prepared/ndvi/{source}/")
-        for pattern in ["*.geotiff", "*.tif"]:
-            _process_ndvi_files(
-                input_dir,
-                output_dir,
-                f"PREPARED-{source.upper()}",
-                pattern=pattern,
-                output_namer=_get_output_name_prepared,
-            )
+        input_dir = Path(f"data/{site_name}/{season}/processed/{source}/")
+        output_dir = Path(f"data/{site_name}/{season}/processed/ndvi/{source}/")
+        _process_ndvi_files(
+            input_dir,
+            output_dir,
+            f"POST-PROCESS-{source.upper()}",
+            pattern="*.geotiff",
+            output_namer=lambda f: f.name.replace(".geotiff", "_ndvi.geotiff"),
+        )
 
-    input_dir = Path(f"data/{site_name}/{season}/prepared/fusion/")
-    output_dir = Path(f"data/{site_name}/{season}/prepared/ndvi/fusion/")
+    input_dir = Path(f"data/{site_name}/{season}/processed/fusion/")
+    output_dir = Path(f"data/{site_name}/{season}/processed/ndvi/fusion/")
     _process_ndvi_files(
         input_dir,
         output_dir,
-        "FUSION",
-        pattern="REFL_*.tif",
-        output_namer=_fusion_namer,
+        "POST-PROCESS-FUSION",
+        pattern="*.geotiff",
+        output_namer=lambda f: f.name.replace(".geotiff", "_ndvi.geotiff"),
     )
 
 
-def create_ndvi_timeseries_prepared(season, site_position, site_name):
+def create_ndvi_timeseries_post_process(season, site_position, site_name):
     for source in ["s2", "s3"]:
-        output_dir = Path(f"data/{site_name}/{season}/prepared/ndvi/{source}/")
+        output_dir = Path(f"data/{site_name}/{season}/processed/ndvi/{source}/")
         _create_timeseries_for_dir(
-            output_dir, site_position, f"PREPARED-{source.upper()}"
+            output_dir, site_position, f"POST-PROCESS-{source.upper()}"
         )
 
-    output_dir = Path(f"data/{site_name}/{season}/prepared/ndvi/fusion/")
-    _create_timeseries_for_dir(output_dir, site_position, "FUSION")
+    output_dir = Path(f"data/{site_name}/{season}/processed/ndvi/fusion/")
+    _create_timeseries_for_dir(output_dir, site_position, "POST-PROCESS-FUSION")

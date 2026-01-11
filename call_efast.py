@@ -155,13 +155,13 @@ def prepare_s3(season, site_position, site_name, date_range=None):
         raise ValueError(f"No REFL files found in {s2_prepared_dir}")
 
     # Get bounds from REFL file (full coverage, matches S2)
+    # Use integer division to match distance_to_clouds logic exactly
     with rasterio.open(sen2_ref_paths[0]) as s2_ref:
         target_bounds = s2_ref.bounds
         target_crs = s2_ref.crs
-        s2_resolution = abs(s2_ref.transform[0])
-        s3_resolution = s2_resolution * RESOLUTION_RATIO
-        width = int((target_bounds.right - target_bounds.left) / s3_resolution)
-        height = int((target_bounds.top - target_bounds.bottom) / s3_resolution)
+        # Use integer division matching distance_to_clouds: s2_height // ratio, s2_width // ratio
+        width = s2_ref.width // RESOLUTION_RATIO
+        height = s2_ref.height // RESOLUTION_RATIO
         s3_transform = rasterio.transform.from_bounds(
             target_bounds.left,
             target_bounds.bottom,

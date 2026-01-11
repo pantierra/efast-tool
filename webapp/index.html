@@ -76,25 +76,34 @@
         const osmUrl = "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png";
         const osmOpts = { attribution: "OpenStreetMap", opacity: 0.4 };
         const mapOpts = { zoomControl: false };
+        const sitePosition = [47.116171, 11.320308];
         const maps = {
-            s2: L.map("s2map", mapOpts).setView([47.27, 11.39], 12).addLayer(L.tileLayer(osmUrl, osmOpts)),
-            fusion: L.map("fusionmap", mapOpts).setView([47.27, 11.39], 12).addLayer(L.tileLayer(osmUrl, osmOpts)),
-            s3: L.map("s3map", mapOpts).setView([47.27, 11.39], 12).addLayer(L.tileLayer(osmUrl, osmOpts))
+            s2: L.map("s2map", mapOpts).setView(sitePosition, 12).addLayer(L.tileLayer(osmUrl, osmOpts)),
+            fusion: L.map("fusionmap", mapOpts).setView(sitePosition, 12).addLayer(L.tileLayer(osmUrl, osmOpts)),
+            s3: L.map("s3map", mapOpts).setView(sitePosition, 12).addLayer(L.tileLayer(osmUrl, osmOpts))
         };
         const ndvimaps = {
-            s2: L.map("s2ndvimap", mapOpts).setView([47.27, 11.39], 12).addLayer(L.tileLayer(osmUrl, osmOpts)),
-            fusion: L.map("fusionndvimap", mapOpts).setView([47.27, 11.39], 12).addLayer(L.tileLayer(osmUrl, osmOpts)),
-            s3: L.map("s3ndvimap", mapOpts).setView([47.27, 11.39], 12).addLayer(L.tileLayer(osmUrl, osmOpts))
+            s2: L.map("s2ndvimap", mapOpts).setView(sitePosition, 12).addLayer(L.tileLayer(osmUrl, osmOpts)),
+            fusion: L.map("fusionndvimap", mapOpts).setView(sitePosition, 12).addLayer(L.tileLayer(osmUrl, osmOpts)),
+            s3: L.map("s3ndvimap", mapOpts).setView(sitePosition, 12).addLayer(L.tileLayer(osmUrl, osmOpts))
         };
         const overlays = { s2: null, fusion: null, s3: null };
         const ndviOverlays = { s2: null, fusion: null, s3: null };
+        const markers = { s2: null, fusion: null, s3: null };
+        const ndviMarkers = { s2: null, fusion: null, s3: null };
         let timeseries = { s2: [], fusion: [], s3: [] };
+        
+        // Add site marker to all maps
+        for (const source of ["s2", "fusion", "s3"]) {
+            markers[source] = L.marker(sitePosition, { icon: L.divIcon({ className: "site-marker", html: "<div style='width:5px;height:5px;background:red;border:1px solid white;border-radius:50%;box-shadow:0 0 1px rgba(0,0,0,0.5);'></div>", iconSize: [5, 5] }) }).addTo(maps[source]);
+            ndviMarkers[source] = L.marker(sitePosition, { icon: L.divIcon({ className: "site-marker", html: "<div style='width:5px;height:5px;background:red;border:1px solid white;border-radius:50%;box-shadow:0 0 1px rgba(0,0,0,0.5);'></div>", iconSize: [5, 5] }) }).addTo(ndvimaps[source]);
+        }
         
         async function loadTimeseries() {
             const [s2, fusion, s3] = await Promise.all([
-                fetch("../data/innsbruck/2024/prepared/ndvi/s2/timeseries.json").then(r => r.json()),
-                fetch("../data/innsbruck/2024/prepared/ndvi/fusion/timeseries.json").then(r => r.json()).catch(() => []),
-                fetch("../data/innsbruck/2024/prepared/ndvi/s3/timeseries.json").then(r => r.json())
+                fetch("../data/innsbruck/2024/processed/ndvi/s2/timeseries.json").then(r => r.json()),
+                fetch("../data/innsbruck/2024/processed/ndvi/fusion/timeseries.json").then(r => r.json()).catch(() => []),
+                fetch("../data/innsbruck/2024/processed/ndvi/s3/timeseries.json").then(r => r.json())
             ]);
             timeseries = { s2, fusion, s3 };
             drawTimeseries();
@@ -190,25 +199,12 @@
                     const d = new Date(target);
                     d.setDate(d.getDate() + offset * dir);
                     const date = d.toISOString().split("T")[0].replace(/-/g, "");
-                    if (source === "fusion") {
-                        const filename = `REFL_${date}.tif`;
-                        try {
-                            const res = await fetch(`../data/innsbruck/2024/prepared/fusion/${filename}`);
-                            if (res.ok) return filename;
-                        } catch {}
-                    } else if (source === "s2") {
-                        const filename = `S2A_MSIL2A_${date}_REFL.tif`;
-                        try {
-                            const res = await fetch(`../data/innsbruck/2024/prepared/${source}/${filename}`);
-                            if (res.ok) return filename;
-                        } catch {}
-                    } else if (source === "s3") {
-                        const filename = `composite_${date}.tif`;
-                        try {
-                            const res = await fetch(`../data/innsbruck/2024/prepared/${source}/${filename}`);
-                            if (res.ok) return filename;
-                        } catch {}
-                    }
+                    // Processed files use DATE_0.geotiff format
+                    const filename = `${date}_0.geotiff`;
+                    try {
+                        const res = await fetch(`../data/innsbruck/2024/processed/${source}/${filename}`);
+                        if (res.ok) return filename;
+                    } catch {}
                 }
             }
             return null;
@@ -220,7 +216,7 @@
         }
         
         async function loadGeotiff(source, filename) {
-            const path = `../data/innsbruck/2024/prepared/${source}/${filename}`;
+            const path = `../data/innsbruck/2024/processed/${source}/${filename}`;
             const tiff = await GeoTIFF.fromArrayBuffer(await (await fetch(path)).arrayBuffer());
             const image = await tiff.getImage();
             const rasters = await image.readRasters();
@@ -265,23 +261,14 @@
             overlays[source] = L.imageOverlay(canvas.toDataURL(), bounds, { opacity: 0.95 }).addTo(maps[source]);
             maps[source].fitBounds(bounds);
             
-            let dateStr;
-            if (source === "fusion") {
-                // REFL_20240101.tif -> extract 20240101
-                dateStr = filename.split("_")[1].replace(".tif", "");
-            } else if (source === "s2") {
-                // S2A_MSIL2A_20240101_REFL.tif -> extract 20240101
-                dateStr = filename.split("_")[2];
-            } else if (source === "s3") {
-                // composite_20240101.tif -> extract 20240101
-                dateStr = filename.split("_")[1].replace(".tif", "");
-            }
+            // Processed files use DATE_0.geotiff format: 20240101_0.geotiff -> extract 20240101
+            const dateStr = filename.split("_")[0];
             const date = `${dateStr.slice(0,4)}-${dateStr.slice(4,6)}-${dateStr.slice(6,8)}`;
             document.getElementById(`${source}rgbdate`).textContent = date;
         }
         
         async function loadNDVI(source, filename, dateStr) {
-            const tiff = await GeoTIFF.fromArrayBuffer(await (await fetch(`../data/innsbruck/2024/prepared/ndvi/${source}/${filename}`)).arrayBuffer());
+            const tiff = await GeoTIFF.fromArrayBuffer(await (await fetch(`../data/innsbruck/2024/processed/ndvi/${source}/${filename}`)).arrayBuffer());
             const image = await tiff.getImage();
             const data = Array.from((await image.readRasters())[0]);
             const width = image.getWidth();
@@ -317,15 +304,8 @@
             ndviOverlays[source] = L.imageOverlay(canvas.toDataURL(), bounds, { opacity: 0.95 }).addTo(ndvimaps[source]);
             ndvimaps[source].fitBounds(bounds);
             
-            let extractedDateStr;
-            if (source === "fusion") {
-                extractedDateStr = filename.split("_")[0];
-            } else if (source === "s2") {
-                // S2 NDVI files are now named YYYYMMDD_ndvi.geotiff
-                extractedDateStr = filename.split("_")[0];
-            } else if (source === "s3") {
-                extractedDateStr = filename.split("_")[1].split(".")[0];
-            }
+            // Processed NDVI files use DATE_0_ndvi.geotiff format: 20240101_0_ndvi.geotiff -> extract 20240101
+            const extractedDateStr = filename.split("_")[0];
             const date = `${extractedDateStr.slice(0,4)}-${extractedDateStr.slice(4,6)}-${extractedDateStr.slice(6,8)}`;
             document.getElementById(`${source}ndvidate`).textContent = date;
         }
@@ -344,26 +324,12 @@
                     const d = new Date(target);
                     d.setDate(d.getDate() + offset * dir);
                     const date = d.toISOString().split("T")[0].replace(/-/g, "");
-                    if (source === "s2") {
-                        // S2 NDVI files are now named YYYYMMDD_ndvi.geotiff
-                        const filename = `${date}_ndvi.geotiff`;
-                        try {
-                            const res = await fetch(`../data/innsbruck/2024/prepared/ndvi/s2/${filename}`);
-                            if (res.ok) return filename;
-                        } catch {}
-                    } else if (source === "fusion") {
-                        const filename = `${date}_ndvi.geotiff`;
-                        try {
-                            const res = await fetch(`../data/innsbruck/2024/prepared/ndvi/fusion/${filename}`);
-                            if (res.ok) return filename;
-                        } catch {}
-                    } else if (source === "s3") {
-                        const filename = `composite_${date}.geotiff`;
-                        try {
-                            const res = await fetch(`../data/innsbruck/2024/prepared/ndvi/s3/${filename}`);
-                            if (res.ok) return filename;
-                        } catch {}
-                    }
+                    // Processed NDVI files use DATE_0_ndvi.geotiff format
+                    const filename = `${date}_0_ndvi.geotiff`;
+                    try {
+                        const res = await fetch(`../data/innsbruck/2024/processed/ndvi/${source}/${filename}`);
+                        if (res.ok) return filename;
+                    } catch {}
                 }
             }
             return null;
