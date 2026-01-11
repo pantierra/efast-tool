@@ -108,6 +108,22 @@
             ndviMarkers[source] = L.marker(sitePosition, { icon: L.divIcon({ className: "site-marker", html: "<div style='width:5px;height:5px;background:red;border:1px solid white;border-radius:50%;box-shadow:0 0 1px rgba(0,0,0,0.5);'></div>", iconSize: [5, 5] }) }).addTo(ndvimaps[source]);
         }
         
+        let syncing = false;
+        const allMaps = Object.values(maps).concat(Object.values(ndvimaps));
+        const syncMaps = (sourceMap) => {
+            if (syncing) return;
+            syncing = true;
+            const center = sourceMap.getCenter();
+            const zoom = sourceMap.getZoom();
+            allMaps.forEach(m => {
+                if (m !== sourceMap) m.setView(center, zoom);
+            });
+            syncing = false;
+        };
+        allMaps.forEach(m => {
+            m.on("moveend zoomend", () => syncMaps(m));
+        });
+        
         async function loadTimeseries() {
             const [s2, fusion, s3] = await Promise.all([
                 fetch("../data/innsbruck/2024/processed/ndvi/s2/timeseries.json").then(r => r.json()),
