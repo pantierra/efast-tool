@@ -1,0 +1,16 @@
+[Unit]
+Description=Satellite Fusion Pipeline Web Server
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/satellite-fusion/webapp
+Environment="PATH=/opt/satellite-fusion/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+ExecStart=/opt/satellite-fusion/venv/bin/python3 -m http.server 8000 --directory /opt/satellite-fusion/webapp
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+
