@@ -20,6 +20,10 @@
         .map-label { font-size: 12px; margin-bottom: 5px; color: #666; }
         .map-date { font-size: 11px; margin-top: 5px; color: #999; }
         .map { height: 500px; border: 1px solid #ccc; }
+        .phenocam-container { margin-top: 20px; width: 100%; }
+        .phenocam-label { font-size: 12px; margin-bottom: 5px; color: #666; }
+        .phenocam-date { font-size: 11px; margin-top: 5px; color: #999; }
+        .phenocam-image { width: 100%; max-height: 400px; object-fit: contain; border: 1px solid #ccc; }
         .leaflet-image-layer { image-rendering: pixelated; }
         .leaflet-control-attribution { display: none; }
     </style>
@@ -64,6 +68,11 @@
                 <div id="s3ndvidate" class="map-date"></div>
                 <div id="s3ndvimap" class="map"></div>
             </div>
+        </div>
+        <div class="phenocam-container">
+            <div class="phenocam-label">PhenoCam Imagery</div>
+            <div id="phenocamdate" class="phenocam-date"></div>
+            <img id="phenocamimage" class="phenocam-image" alt="PhenoCam">
         </div>
     </div>
     <script>
@@ -335,6 +344,28 @@
             return null;
         }
         
+        async function loadPhenoCam(dateStr) {
+            const target = new Date(dateStr);
+            for (let offset = 0; offset < 15; offset++) {
+                for (const dir of [0, -1, 1]) {
+                    const d = new Date(target);
+                    d.setDate(d.getDate() + offset * dir);
+                    const date = d.toISOString().split("T")[0].replace(/-/g, "");
+                    const url = `../data/innsbruck/2024/raw/phenocam/${date}.jpg`;
+                    try {
+                        const res = await fetch(url);
+                        if (res.ok) {
+                            document.getElementById("phenocamimage").src = url;
+                            document.getElementById("phenocamdate").textContent = `${date.slice(0,4)}-${date.slice(4,6)}-${date.slice(6,8)}`;
+                            return;
+                        }
+                    } catch {}
+                }
+            }
+            document.getElementById("phenocamimage").src = "";
+            document.getElementById("phenocamdate").textContent = "";
+        }
+        
         async function updateImages() {
             const date = dateFromDays(parseInt(slider.value));
             dateDisplay.textContent = date;
@@ -360,6 +391,7 @@
                     }
                 }
             }
+            await loadPhenoCam(date);
         }
         
         const urlParams = new URLSearchParams(location.search);
