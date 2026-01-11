@@ -10,6 +10,14 @@
         body { margin: 0; font-family: sans-serif; }
         .slider-container { position: sticky; top: 0; background: white; padding: 20px; z-index: 1000; border-bottom: 1px solid #ccc; }
         .container { max-width: 1400px; margin: 0 auto; padding: 20px; }
+        .header { display: flex; gap: 20px; margin-bottom: 20px; border-bottom: 1px solid #ccc; padding-top: 10px;padding-bottom: 20px;}
+        .header-col { flex: 1; }
+        .site-info h1 { margin: 0 0 10px 0; font-size: 24px; }
+        .site-info h2 { margin: 0 0 20px 0; font-size: 18px; color: #666; }
+        .phenocam-label { font-size: 12px; margin-bottom: 5px; color: #666; }
+        .phenocam-date { font-size: 11px; margin-top: 5px; color: #999; }
+        .phenocam-image { width: 100%; height: 200px; object-fit: contain; border: 1px solid #ccc; }
+        .sitemap { height: 200px; border: 1px solid #ccc; margin-top: 32px; }
         #dateSlider { width: 100%; }
         #dateDisplay { text-align: center; margin: 10px 0; font-size: 18px; }
         .maps { display: flex; gap: 20px; }
@@ -20,10 +28,6 @@
         .map-label { font-size: 12px; margin-bottom: 5px; color: #666; }
         .map-date { font-size: 11px; margin-top: 5px; color: #999; }
         .map { height: 500px; border: 1px solid #ccc; }
-        .phenocam-container { margin-top: 20px; width: 100%; }
-        .phenocam-label { font-size: 12px; margin-bottom: 5px; color: #666; }
-        .phenocam-date { font-size: 11px; margin-top: 5px; color: #999; }
-        .phenocam-image { width: 100%; max-height: 400px; object-fit: contain; border: 1px solid #ccc; }
         .leaflet-image-layer { image-rendering: pixelated; }
         .leaflet-control-attribution { display: none; }
     </style>
@@ -34,15 +38,29 @@
             <input type="range" id="dateSlider" min="0" max="365" value="0">
             <div id="dateDisplay">2024-01-01</div>
         </div>
+        <div class="header">
+            <div class="header-col site-info">
+                <h1 id="siteName">Innsbruck</h1>
+                <h2 id="season">2024</h2>
+            </div>
+            <div class="header-col">
+                <div class="phenocam-label">PhenoCam</div>
+                <div id="phenocamdate" class="phenocam-date"></div>
+                <img id="phenocamimage" class="phenocam-image" alt="PhenoCam">
+            </div>
+            <div class="header-col">
+                <div id="sitemap" class="sitemap"></div>
+            </div>
+        </div>
         <div class="maps">
             <div class="map-container">
                 <h3>S2</h3>
                 <div class="timeseries-label">NDVI Timeseries</div>
                 <canvas id="s2timeseries" class="timeseries"></canvas>
-                <div class="map-label">RGB Imagery</div>
+                <div class="map-label">RGB Composite</div>
                 <div id="s2rgbdate" class="map-date"></div>
                 <div id="s2map" class="map"></div>
-                <div class="map-label">NDVI Imagery</div>
+                <div class="map-label">NDVI</div>
                 <div id="s2ndvidate" class="map-date"></div>
                 <div id="s2ndvimap" class="map"></div>
             </div>
@@ -50,10 +68,10 @@
                 <h3>Fusion</h3>
                 <div class="timeseries-label">NDVI Timeseries</div>
                 <canvas id="fusiontimeseries" class="timeseries"></canvas>
-                <div class="map-label">RGB Imagery</div>
+                <div class="map-label">RGB Composite</div>
                 <div id="fusionrgbdate" class="map-date"></div>
                 <div id="fusionmap" class="map"></div>
-                <div class="map-label">NDVI Imagery</div>
+                <div class="map-label">NDVI</div>
                 <div id="fusionndvidate" class="map-date"></div>
                 <div id="fusionndvimap" class="map"></div>
             </div>
@@ -61,18 +79,13 @@
                 <h3>S3</h3>
                 <div class="timeseries-label">NDVI Timeseries</div>
                 <canvas id="s3timeseries" class="timeseries"></canvas>
-                <div class="map-label">RGB Imagery</div>
+                <div class="map-label">RGB Composite</div>
                 <div id="s3rgbdate" class="map-date"></div>
                 <div id="s3map" class="map"></div>
-                <div class="map-label">NDVI Imagery</div>
+                <div class="map-label">NDVI</div>
                 <div id="s3ndvidate" class="map-date"></div>
                 <div id="s3ndvimap" class="map"></div>
             </div>
-        </div>
-        <div class="phenocam-container">
-            <div class="phenocam-label">PhenoCam Imagery</div>
-            <div id="phenocamdate" class="phenocam-date"></div>
-            <img id="phenocamimage" class="phenocam-image" alt="PhenoCam">
         </div>
     </div>
     <script>
@@ -86,6 +99,8 @@
         const osmOpts = { attribution: "OpenStreetMap", opacity: 0.4 };
         const mapOpts = { zoomControl: false };
         const sitePosition = [47.116171, 11.320308];
+        const siteMap = L.map("sitemap", { zoomControl: false }).setView(sitePosition, 4).addLayer(L.tileLayer(osmUrl, { attribution: "OpenStreetMap", opacity: 1 }));
+        L.marker(sitePosition, { icon: L.divIcon({ className: "site-marker", html: "<div style='width:8px;height:8px;background:red;border:2px solid white;border-radius:50%;box-shadow:0 0 2px rgba(0,0,0,0.5);'></div>", iconSize: [8, 8] }) }).addTo(siteMap);
         const maps = {
             s2: L.map("s2map", mapOpts).setView(sitePosition, 12).addLayer(L.tileLayer(osmUrl, osmOpts)),
             fusion: L.map("fusionmap", mapOpts).setView(sitePosition, 12).addLayer(L.tileLayer(osmUrl, osmOpts)),
@@ -228,7 +243,7 @@
                     const date = target.toISOString().split("T")[0].replace(/-/g, "");
                     const filename = `${date}_0.geotiff`;
                     try {
-                        const res = await fetch(`../data/innsbruck/2024/processed/${source}/${filename}`);
+                        const res = await fetch(`../data/innsbruck/2024/processed/${source}/${filename}`, { method: 'HEAD' });
                         if (res.ok) return filename;
                     } catch {}
                 } else {
@@ -239,7 +254,7 @@
                         const date = d.toISOString().split("T")[0].replace(/-/g, "");
                         const filename = `${date}_0.geotiff`;
                         try {
-                            const res = await fetch(`../data/innsbruck/2024/processed/${source}/${filename}`);
+                            const res = await fetch(`../data/innsbruck/2024/processed/${source}/${filename}`, { method: 'HEAD' });
                             if (res.ok) return filename;
                         } catch {}
                     }
@@ -366,7 +381,7 @@
                     const date = target.toISOString().split("T")[0].replace(/-/g, "");
                     const filename = `${date}_0_ndvi.geotiff`;
                     try {
-                        const res = await fetch(`../data/innsbruck/2024/processed/ndvi/${source}/${filename}`);
+                        const res = await fetch(`../data/innsbruck/2024/processed/ndvi/${source}/${filename}`, { method: 'HEAD' });
                         if (res.ok) return filename;
                     } catch {}
                 } else {
@@ -377,7 +392,7 @@
                         const date = d.toISOString().split("T")[0].replace(/-/g, "");
                         const filename = `${date}_0_ndvi.geotiff`;
                         try {
-                            const res = await fetch(`../data/innsbruck/2024/processed/ndvi/${source}/${filename}`);
+                            const res = await fetch(`../data/innsbruck/2024/processed/ndvi/${source}/${filename}`, { method: 'HEAD' });
                             if (res.ok) return filename;
                         } catch {}
                     }
@@ -395,7 +410,7 @@
                     const date = d.toISOString().split("T")[0].replace(/-/g, "");
                     const url = `../data/innsbruck/2024/raw/phenocam/${date}.jpg`;
                     try {
-                        const res = await fetch(url);
+                        const res = await fetch(url, { method: 'HEAD' });
                         if (res.ok) {
                             document.getElementById("phenocamimage").src = url;
                             document.getElementById("phenocamdate").textContent = `${date.slice(0,4)}-${date.slice(4,6)}-${date.slice(6,8)}`;

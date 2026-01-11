@@ -67,10 +67,17 @@ ENDSSH
         echo "Data upload complete!"
         ;;
     
+    code)
+        echo "Uploading code to $SERVER..."
+        rsync -av --exclude='__pycache__' --exclude='*.pyc' --exclude='.git' --exclude='data/' --exclude='.env' . "$SERVER:$APP_DIR/"
+        echo "Code upload complete!"
+        ;;
+    
     *)
-        echo "Usage: $0 {setup|upload} [server]"
+        echo "Usage: $0 {setup|upload|code} [server]"
         echo "  setup  - Deploy code and setup server (default)"
         echo "  upload - Upload data directory only"
+        echo "  code   - Upload code files only (no setup)"
         exit 1
         ;;
 esac
