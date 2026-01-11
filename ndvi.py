@@ -38,14 +38,26 @@ def _get_ndvi_value(ndvi_file, site_position):
         with rasterio.open(ndvi_file) as src:
             lon, lat = site_position[1], site_position[0]
             x, y = transform_coords("EPSG:4326", src.crs, [lon], [lat])
+
+            # Check if point is within bounds
+            if not (
+                src.bounds.left <= x[0] <= src.bounds.right
+                and src.bounds.bottom <= y[0] <= src.bounds.top
+            ):
+                return None  # Point is outside raster bounds
+
             samples = list(src.sample([(x[0], y[0])]))
             if samples:
                 value = float(samples[0][0])
-                if value != 0 and not np.isnan(value):
-                    return value
-                # Return the raw value even if 0 or NaN for diagnostic purposes
+                # Check if it's actually nodata (using raster's nodata value)
+                if src.nodata is not None and value == src.nodata:
+                    return None  # This is nodata, not a valid 0 value
+                if np.isnan(value):
+                    return None  # NaN is invalid
+                # 0 is a valid NDVI value (no vegetation), so return it
                 return value
-    except Exception:
+    except Exception as e:
+        print(f"Error sampling {ndvi_file.name}: {e}")
         pass
     return None
 
@@ -56,21 +68,41 @@ def _create_timeseries_for_dir(output_dir, site_position, source_name):
 
     for ndvi_file in sorted(output_dir.glob("*.geotiff")):
         filename = ndvi_file.name
-        date_str = filename.split("_")[0]
-        try:
-            date = datetime.strptime(date_str, "%Y%m%d").isoformat()
-        except ValueError:
+        # Extract date from filename
+        # Format examples:
+        # - YYYYMMDD_ndvi.geotiff -> date is at [0]
+        # - YYYYMMDD_0.geotiff -> date is at [0]
+        # - composite_YYYYMMDD.geotiff -> date is at [1]
+        parts = filename.replace(".geotiff", "").split("_")
+        date_str = None
+
+        # Try to find a date pattern (8 digits)
+        for part in parts:
+            if len(part) == 8 and part.isdigit():
+                date_str = part
+                break
+
+        if date_str:
+            try:
+                date = datetime.strptime(date_str, "%Y%m%d").isoformat()
+            except ValueError:
+                date = date_str
+        else:
+            # Fallback: use first part (for old MSIL2A_ndvi.geotiff files)
+            date_str = parts[0]
             date = date_str
+            print(
+                f"[NDVI-{source_name}] Warning: Could not extract date from {filename}, using '{date_str}'"
+            )
 
         ndvi_value = _get_ndvi_value(ndvi_file, site_position)
         if ndvi_value is None:
-            print(f"[NDVI-{source_name}] Warning: Could not sample {filename}")
-        elif ndvi_value == 0:
-            print(f"[NDVI-{source_name}] Warning: Could not sample {filename} (NoData)")
-            ndvi_value = None  # Set to None for timeseries
-        elif np.isnan(ndvi_value):
-            print(f"[NDVI-{source_name}] Warning: Could not sample {filename} (NaN)")
-            ndvi_value = None  # Set to None for timeseries
+            print(
+                f"[NDVI-{source_name}] Warning: Could not sample {filename} (outside bounds or nodata)"
+            )
+        # Note: 0 is a valid NDVI value (no vegetation), so we keep it
+        # The _get_ndvi_value function now properly distinguishes between
+        # valid 0 values and nodata values
 
         timeseries.append({"date": date, "filename": filename, "ndvi": ndvi_value})
 
@@ -98,19 +130,19 @@ def _process_ndvi_files(
         try:
             with rasterio.open(geotiff_file) as src:
                 if src.count < 4:
-                    print(f"[NDVI-{source_name}] Skipping {geotiff_file.name} (only {src.count} band(s), need 4+)")
+                    print(
+                        f"[NDVI-{source_name}] Skipping {geotiff_file.name} (only {src.count} band(s), need 4+)"
+                    )
                     continue
         except Exception as e:
-            print(f"[NDVI-{source_name}] Skipping {geotiff_file.name} (error reading: {e})")
+            print(
+                f"[NDVI-{source_name}] Skipping {geotiff_file.name} (error reading: {e})"
+            )
             continue
 
         output_file = output_dir / (
             output_namer(geotiff_file) if output_namer else geotiff_file.name
         )
-
-        if output_file.exists():
-            print(f"[NDVI-{source_name}] Skipping {geotiff_file.name} (exists)")
-            continue
 
         _calculate_and_write_ndvi(geotiff_file, output_file)
         print(f"[NDVI-{source_name}] Saved: {output_file}")
@@ -132,7 +164,18 @@ def create_ndvi_timeseries_raw(season, site_position, site_name):
 def _get_output_name_prepared(geotiff_file):
     if geotiff_file.suffix == ".tif":
         if "REFL" in geotiff_file.stem:
-            date_str = geotiff_file.stem.split("_")[1]
+            # For S2: S2A_MSIL2A_20240101_REFL -> date is at index [2]
+            # For S3: composite_20240101.tif -> date is at index [1] after removing .tif
+            parts = geotiff_file.stem.split("_")
+            if len(parts) >= 3 and parts[0].startswith("S2"):
+                # S2 format: S2A_MSIL2A_YYYYMMDD_REFL
+                date_str = parts[2]
+            elif len(parts) >= 2 and parts[0] == "composite":
+                # S3 format: composite_YYYYMMDD
+                date_str = parts[1]
+            else:
+                # Fallback: try index [1] for other formats
+                date_str = parts[1] if len(parts) > 1 else parts[0]
             return f"{date_str}_ndvi.geotiff"
         return geotiff_file.name.replace(".tif", ".geotiff")
     return geotiff_file.name

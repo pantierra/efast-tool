@@ -9,17 +9,20 @@ from rasterio.warp import Resampling
 from rasterio.vrt import WarpedVRT
 from rasterio import shutil as rio_shutil
 
+
 def _import_efast():
     """Lazy import of efast to avoid import errors when not using efast functions."""
     try:
         import efast
         from efast.s2_processing import distance_to_clouds
         from efast.s3_processing import reproject_and_crop_s3
+
         return efast, distance_to_clouds, reproject_and_crop_s3
     except ImportError:
         raise ImportError(
             "efast package not found. Install with: pip install git+https://github.com/DHI-GRAS/efast.git"
         )
+
 
 RESOLUTION_RATIO = 21
 
@@ -33,11 +36,22 @@ def _load_clouds(clouds_file):
     return clouds
 
 
-def _reproject_raster_to_target(src_path, dst_path, target_bounds, target_crs, width, height, resampling=Resampling.cubic):
+def _reproject_raster_to_target(
+    src_path,
+    dst_path,
+    target_bounds,
+    target_crs,
+    width,
+    height,
+    resampling=Resampling.cubic,
+):
     dst_transform = rasterio.transform.from_bounds(
-        target_bounds.left, target_bounds.bottom,
-        target_bounds.right, target_bounds.top,
-        width, height
+        target_bounds.left,
+        target_bounds.bottom,
+        target_bounds.right,
+        target_bounds.top,
+        width,
+        height,
     )
     with rasterio.open(src_path) as src:
         vrt_options = {
@@ -88,7 +102,9 @@ def prepare_s2(season, site_position, site_name, date_range=None):
             with rasterio.open(temp_normalized, "w", **profile) as dst:
                 dst.write(data)
 
-        _reproject_raster_to_target(temp_normalized, refl_dst, target_bounds, target_crs, s2_width, s2_height)
+        _reproject_raster_to_target(
+            temp_normalized, refl_dst, target_bounds, target_crs, s2_width, s2_height
+        )
         temp_normalized.unlink()
 
     _, distance_to_clouds, _ = _import_efast()
@@ -149,6 +165,8 @@ def run_efast(season, site_position, site_name, date_range=None):
     fusion_output_dir.mkdir(parents=True, exist_ok=True)
     print(f"[EFAST] Starting fusion: {site_name} ({lat:.6f}, {lon:.6f}), {season}")
 
+    efast, _, _ = _import_efast()
+
     start_str, end_str = datetime_range.split("/")
     start_date = datetime.strptime(start_str, "%Y-%m-%d")
     end_date = datetime.strptime(end_str, "%Y-%m-%d")
@@ -157,18 +175,25 @@ def run_efast(season, site_position, site_name, date_range=None):
     while current_date <= end_date:
         date_str = current_date.strftime("%Y%m%d")
         output_file = fusion_output_dir / f"REFL_{date_str}.tif"
-        if output_file.exists():
-            print(f"[EFAST] Skipping {date_str} (exists)")
-        else:
-            try:
-                efast.fusion(
-                    current_date, s3_output_dir, s2_output_dir, fusion_output_dir,
-                    product="REFL", max_days=30, date_position=2,
-                    minimum_acquisition_importance=0.0, ratio=RESOLUTION_RATIO,
-                )
-                print(f"[EFAST] Saved: {output_file}" if output_file.exists() else f"[EFAST] No output for {date_str} (insufficient nearby data)")
-            except Exception as e:
-                print(f"[EFAST] Error processing {date_str}: {e}")
+        try:
+            efast.fusion(
+                current_date,
+                s3_output_dir,
+                s2_output_dir,
+                fusion_output_dir,
+                product="REFL",
+                max_days=30,
+                date_position=2,
+                minimum_acquisition_importance=0.0,
+                ratio=RESOLUTION_RATIO,
+            )
+            print(
+                f"[EFAST] Saved: {output_file}"
+                if output_file.exists()
+                else f"[EFAST] No output for {date_str} (insufficient nearby data)"
+            )
+        except Exception as e:
+            print(f"[EFAST] Error processing {date_str}: {e}")
         current_date += timedelta(days=1)
 
     print("[EFAST] Completed")

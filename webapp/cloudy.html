@@ -18,6 +18,7 @@
         .timeseries-label { font-size: 12px; margin-bottom: 5px; color: #666; }
         .timeseries { width: 100%; height: 120px; border: 1px solid #ccc; margin-bottom: 10px; }
         .map-label { font-size: 12px; margin-bottom: 5px; color: #666; }
+        .map-date { font-size: 11px; margin-top: 5px; color: #999; }
         .map { height: 500px; border: 1px solid #ccc; }
         .leaflet-image-layer { image-rendering: pixelated; }
         .leaflet-control-attribution { display: none; }
@@ -28,6 +29,10 @@
         <div class="slider-container">
             <input type="range" id="dateSlider" min="0" max="365" value="0">
             <div id="dateDisplay">2024-01-01</div>
+            <label style="display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 10px;">
+                <input type="checkbox" id="showClouds" checked>
+                <span>Show cloud-covered data</span>
+            </label>
         </div>
         <div class="maps">
             <div class="map-container">
@@ -35,8 +40,10 @@
                 <div class="timeseries-label">NDVI Timeseries</div>
                 <canvas id="s2timeseries" class="timeseries"></canvas>
                 <div class="map-label">RGB Imagery</div>
+                <div id="s2rgbdate" class="map-date"></div>
                 <div id="s2map" class="map"></div>
                 <div class="map-label">NDVI Imagery</div>
+                <div id="s2ndvidate" class="map-date"></div>
                 <div id="s2ndvimap" class="map"></div>
             </div>
             <div class="map-container">
@@ -44,8 +51,10 @@
                 <div class="timeseries-label">NDVI Timeseries</div>
                 <canvas id="s3timeseries" class="timeseries"></canvas>
                 <div class="map-label">RGB Imagery</div>
+                <div id="s3rgbdate" class="map-date"></div>
                 <div id="s3map" class="map"></div>
                 <div class="map-label">NDVI Imagery</div>
+                <div id="s3ndvidate" class="map-date"></div>
                 <div id="s3ndvimap" class="map"></div>
             </div>
         </div>
@@ -71,13 +80,17 @@
         const overlays = { s2: null, s3: null };
         const ndviOverlays = { s2: null, s3: null };
         let timeseries = { s2: [], s3: [] };
+        let clouds = { s2: new Set(), s3: new Set() };
+        const showCloudsCheckbox = document.getElementById("showClouds");
         
         async function loadTimeseries() {
-            const [s2, s3] = await Promise.all([
-                fetch("../data/innsbruck/2024/ndvi/s2/timeseries.json").then(r => r.json()),
-                fetch("../data/innsbruck/2024/ndvi/s3/timeseries.json").then(r => r.json())
+            const [s2, s3, cloudData] = await Promise.all([
+                fetch("../data/innsbruck/2024/raw/ndvi/s2/timeseries.json").then(r => r.json()),
+                fetch("../data/innsbruck/2024/raw/ndvi/s3/timeseries.json").then(r => r.json()),
+                fetch("../data/innsbruck/2024/clouds.json").then(r => r.json()).catch(() => ({ s2: [], s3: [] }))
             ]);
             timeseries = { s2, s3 };
+            clouds = { s2: new Set(cloudData.s2 || []), s3: new Set(cloudData.s3 || []) };
             drawTimeseries();
         }
         
@@ -93,7 +106,10 @@
                 const plotW = w - pad * 2, plotH = h - pad * 2;
                 
                 ctx.clearRect(0, 0, w, h);
-                const data = timeseries[source].filter(t => t.ndvi !== null);
+                let data = timeseries[source].filter(t => t.ndvi !== null);
+                if (!showCloudsCheckbox.checked && clouds[source]) {
+                    data = data.filter(t => !clouds[source].has(t.filename));
+                }
                 if (!data.length) continue;
                 
                 const dates = data.map(t => new Date(t.date));
@@ -160,8 +176,9 @@
                     const date = d.toISOString().split("T")[0].replace(/-/g, "");
                     for (let i = 0; i < 3; i++) {
                         const filename = `${date}_${i}.geotiff`;
+                        if (!showCloudsCheckbox.checked && clouds[source] && clouds[source].has(filename)) continue;
                         try {
-                            const res = await fetch(`../data/innsbruck/2024/${source}/${filename}`);
+                            const res = await fetch(`../data/innsbruck/2024/raw/${source}/${filename}`);
                             if (res.ok) return filename;
                         } catch {}
                     }
@@ -176,7 +193,8 @@
         }
         
         async function loadGeotiff(source, filename) {
-            const tiff = await GeoTIFF.fromArrayBuffer(await (await fetch(`../data/innsbruck/2024/${source}/${filename}`)).arrayBuffer());
+            const path = `../data/innsbruck/2024/raw/${source}/${filename}`;
+            const tiff = await GeoTIFF.fromArrayBuffer(await (await fetch(path)).arrayBuffer());
             const image = await tiff.getImage();
             const rasters = await image.readRasters();
             const width = image.getWidth();
@@ -219,10 +237,14 @@
             if (overlays[source]) maps[source].removeLayer(overlays[source]);
             overlays[source] = L.imageOverlay(canvas.toDataURL(), bounds, { opacity: 0.95 }).addTo(maps[source]);
             maps[source].fitBounds(bounds);
+            
+            const dateStr = filename.split("_")[0];
+            const date = `${dateStr.slice(0,4)}-${dateStr.slice(4,6)}-${dateStr.slice(6,8)}`;
+            document.getElementById(`${source}rgbdate`).textContent = date;
         }
         
         async function loadNDVI(source, filename) {
-            const tiff = await GeoTIFF.fromArrayBuffer(await (await fetch(`../data/innsbruck/2024/ndvi/${source}/${filename}`)).arrayBuffer());
+            const tiff = await GeoTIFF.fromArrayBuffer(await (await fetch(`../data/innsbruck/2024/raw/ndvi/${source}/${filename}`)).arrayBuffer());
             const image = await tiff.getImage();
             const data = Array.from((await image.readRasters())[0]);
             const width = image.getWidth();
@@ -257,6 +279,10 @@
             if (ndviOverlays[source]) ndvimaps[source].removeLayer(ndviOverlays[source]);
             ndviOverlays[source] = L.imageOverlay(canvas.toDataURL(), bounds, { opacity: 0.95 }).addTo(ndvimaps[source]);
             ndvimaps[source].fitBounds(bounds);
+            
+            const dateStr = filename.split("_")[0];
+            const date = `${dateStr.slice(0,4)}-${dateStr.slice(4,6)}-${dateStr.slice(6,8)}`;
+            document.getElementById(`${source}ndvidate`).textContent = date;
         }
         
         const fmtDate = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -275,8 +301,9 @@
                     const date = d.toISOString().split("T")[0].replace(/-/g, "");
                     for (let i = 0; i < 3; i++) {
                         const filename = `${date}_${i}.geotiff`;
+                        if (!showCloudsCheckbox.checked && clouds[source] && clouds[source].has(filename)) continue;
                         try {
-                            const res = await fetch(`../data/innsbruck/2024/ndvi/${source}/${filename}`);
+                            const res = await fetch(`../data/innsbruck/2024/raw/ndvi/${source}/${filename}`);
                             if (res.ok) return filename;
                         } catch {}
                     }
@@ -288,7 +315,10 @@
         async function updateImages() {
             const date = dateFromDays(parseInt(slider.value));
             dateDisplay.textContent = date;
-            history.replaceState({}, "", `?date=${date}`);
+            const params = new URLSearchParams();
+            params.set("date", date);
+            if (!showCloudsCheckbox.checked) params.set("hideClouds", "1");
+            history.replaceState({}, "", `?${params}`);
             drawTimeseries();
             for (const source of ["s2", "s3"]) {
                 const filename = await findFile(date, source);
@@ -310,9 +340,12 @@
             }
         }
         
-        const urlDate = new URLSearchParams(location.search).get("date");
+        const urlParams = new URLSearchParams(location.search);
+        const urlDate = urlParams.get("date");
         if (urlDate) slider.value = daysFromDate(urlDate);
+        if (urlParams.get("hideClouds") === "1") showCloudsCheckbox.checked = false;
         slider.addEventListener("input", updateImages);
+        showCloudsCheckbox.addEventListener("change", updateImages);
         loadTimeseries().then(updateImages);
     </script>
 </body>

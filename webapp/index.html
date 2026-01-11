@@ -29,10 +29,6 @@
         <div class="slider-container">
             <input type="range" id="dateSlider" min="0" max="365" value="0">
             <div id="dateDisplay">2024-01-01</div>
-            <label style="display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 10px;">
-                <input type="checkbox" id="showClouds" checked>
-                <span>Show cloud-covered data</span>
-            </label>
         </div>
         <div class="maps">
             <div class="map-container">
@@ -93,18 +89,14 @@
         const overlays = { s2: null, fusion: null, s3: null };
         const ndviOverlays = { s2: null, fusion: null, s3: null };
         let timeseries = { s2: [], fusion: [], s3: [] };
-        let clouds = { s2: new Set(), s3: new Set() };
-        const showCloudsCheckbox = document.getElementById("showClouds");
         
         async function loadTimeseries() {
-            const [s2, fusion, s3, cloudData] = await Promise.all([
-                fetch("../data/innsbruck/2024/ndvi/s2/timeseries.json").then(r => r.json()),
-                fetch("../data/innsbruck/2024/ndvi/fusion/timeseries.json").then(r => r.json()).catch(() => []),
-                fetch("../data/innsbruck/2024/ndvi/s3/timeseries.json").then(r => r.json()),
-                fetch("../data/innsbruck/2024/clouds.json").then(r => r.json()).catch(() => ({ s2: [], s3: [] }))
+            const [s2, fusion, s3] = await Promise.all([
+                fetch("../data/innsbruck/2024/prepared/ndvi/s2/timeseries.json").then(r => r.json()),
+                fetch("../data/innsbruck/2024/prepared/ndvi/fusion/timeseries.json").then(r => r.json()).catch(() => []),
+                fetch("../data/innsbruck/2024/prepared/ndvi/s3/timeseries.json").then(r => r.json())
             ]);
             timeseries = { s2, fusion, s3 };
-            clouds = { s2: new Set(cloudData.s2 || []), s3: new Set(cloudData.s3 || []) };
             drawTimeseries();
         }
         
@@ -120,21 +112,29 @@
                 const plotW = w - pad * 2, plotH = h - pad * 2;
                 
                 ctx.clearRect(0, 0, w, h);
-                let data = timeseries[source].filter(t => t.ndvi !== null);
-                if (!showCloudsCheckbox.checked && clouds[source]) {
-                    data = data.filter(t => !clouds[source].has(t.filename));
-                }
-                if (!data.length) continue;
+                // Get all data with valid dates (dates are now in ISO format from JSON)
+                let data = timeseries[source].filter(t => {
+                    if (!t.date) return false;
+                    const date = new Date(t.date);
+                    return !isNaN(date.getTime());
+                });
+                
+                // Filter to only entries with non-null NDVI values for plotting
+                const dataWithNdvi = data.filter(t => t.ndvi !== null);
+                if (!dataWithNdvi.length) continue;
+                
+                // Use data with NDVI for plotting
+                data = dataWithNdvi;
                 
                 const dates = data.map(t => new Date(t.date));
                 const minDate = new Date(Math.min(...dates));
                 const maxDate = new Date(Math.max(...dates));
-                const dateRange = maxDate - minDate;
+                const dateRange = maxDate - minDate || 1; // Avoid division by zero
                 
                 const ndvi = data.map(t => t.ndvi);
                 const minNdvi = Math.min(...ndvi);
                 const maxNdvi = Math.max(...ndvi);
-                const ndviRange = maxNdvi - minNdvi;
+                const ndviRange = maxNdvi - minNdvi || 1; // Avoid division by zero
                 
                 const x = (d) => pad + ((new Date(d) - minDate) / dateRange) * plotW;
                 const y = (v) => pad + plotH - ((v - minNdvi) / ndviRange) * plotH;
@@ -169,7 +169,9 @@
                 ctx.lineTo(xPos, pad + plotH);
                 ctx.stroke();
                 
-                const closest = data.reduce((c, t) => 
+                const validData = data.filter(t => !isNaN(new Date(t.date).getTime()));
+                if (validData.length === 0) continue;
+                const closest = validData.reduce((c, t) => 
                     Math.abs(new Date(t.date) - new Date(currentDate)) < Math.abs(new Date(c.date) - new Date(currentDate)) ? t : c
                 );
                 if (closest && closest.ndvi !== null) {
@@ -191,18 +193,21 @@
                     if (source === "fusion") {
                         const filename = `REFL_${date}.tif`;
                         try {
-                            const res = await fetch(`../data/innsbruck/2024/efast/fusion/${filename}`);
+                            const res = await fetch(`../data/innsbruck/2024/prepared/fusion/${filename}`);
                             if (res.ok) return filename;
                         } catch {}
-                    } else {
-                        for (let i = 0; i < 3; i++) {
-                            const filename = `${date}_${i}.geotiff`;
-                            if (!showCloudsCheckbox.checked && clouds[source] && clouds[source].has(filename)) continue;
-                            try {
-                                const res = await fetch(`../data/innsbruck/2024/${source}/${filename}`);
-                                if (res.ok) return filename;
-                            } catch {}
-                        }
+                    } else if (source === "s2") {
+                        const filename = `S2A_MSIL2A_${date}_REFL.tif`;
+                        try {
+                            const res = await fetch(`../data/innsbruck/2024/prepared/${source}/${filename}`);
+                            if (res.ok) return filename;
+                        } catch {}
+                    } else if (source === "s3") {
+                        const filename = `composite_${date}.tif`;
+                        try {
+                            const res = await fetch(`../data/innsbruck/2024/prepared/${source}/${filename}`);
+                            if (res.ok) return filename;
+                        } catch {}
                     }
                 }
             }
@@ -215,7 +220,7 @@
         }
         
         async function loadGeotiff(source, filename) {
-            const path = source === "fusion" ? `../data/innsbruck/2024/efast/fusion/${filename}` : `../data/innsbruck/2024/${source}/${filename}`;
+            const path = `../data/innsbruck/2024/prepared/${source}/${filename}`;
             const tiff = await GeoTIFF.fromArrayBuffer(await (await fetch(path)).arrayBuffer());
             const image = await tiff.getImage();
             const rasters = await image.readRasters();
@@ -260,13 +265,23 @@
             overlays[source] = L.imageOverlay(canvas.toDataURL(), bounds, { opacity: 0.95 }).addTo(maps[source]);
             maps[source].fitBounds(bounds);
             
-            const dateStr = source === "fusion" ? filename.split("_")[1] : filename.split("_")[0];
+            let dateStr;
+            if (source === "fusion") {
+                // REFL_20240101.tif -> extract 20240101
+                dateStr = filename.split("_")[1].replace(".tif", "");
+            } else if (source === "s2") {
+                // S2A_MSIL2A_20240101_REFL.tif -> extract 20240101
+                dateStr = filename.split("_")[2];
+            } else if (source === "s3") {
+                // composite_20240101.tif -> extract 20240101
+                dateStr = filename.split("_")[1].replace(".tif", "");
+            }
             const date = `${dateStr.slice(0,4)}-${dateStr.slice(4,6)}-${dateStr.slice(6,8)}`;
             document.getElementById(`${source}rgbdate`).textContent = date;
         }
         
-        async function loadNDVI(source, filename) {
-            const tiff = await GeoTIFF.fromArrayBuffer(await (await fetch(`../data/innsbruck/2024/ndvi/${source}/${filename}`)).arrayBuffer());
+        async function loadNDVI(source, filename, dateStr) {
+            const tiff = await GeoTIFF.fromArrayBuffer(await (await fetch(`../data/innsbruck/2024/prepared/ndvi/${source}/${filename}`)).arrayBuffer());
             const image = await tiff.getImage();
             const data = Array.from((await image.readRasters())[0]);
             const width = image.getWidth();
@@ -302,8 +317,16 @@
             ndviOverlays[source] = L.imageOverlay(canvas.toDataURL(), bounds, { opacity: 0.95 }).addTo(ndvimaps[source]);
             ndvimaps[source].fitBounds(bounds);
             
-            const dateStr = source === "fusion" ? filename.split("_")[0] : filename.split("_")[0];
-            const date = `${dateStr.slice(0,4)}-${dateStr.slice(4,6)}-${dateStr.slice(6,8)}`;
+            let extractedDateStr;
+            if (source === "fusion") {
+                extractedDateStr = filename.split("_")[0];
+            } else if (source === "s2") {
+                // S2 NDVI files are now named YYYYMMDD_ndvi.geotiff
+                extractedDateStr = filename.split("_")[0];
+            } else if (source === "s3") {
+                extractedDateStr = filename.split("_")[1].split(".")[0];
+            }
+            const date = `${extractedDateStr.slice(0,4)}-${extractedDateStr.slice(4,6)}-${extractedDateStr.slice(6,8)}`;
             document.getElementById(`${source}ndvidate`).textContent = date;
         }
         
@@ -321,21 +344,25 @@
                     const d = new Date(target);
                     d.setDate(d.getDate() + offset * dir);
                     const date = d.toISOString().split("T")[0].replace(/-/g, "");
-                    if (source === "fusion") {
+                    if (source === "s2") {
+                        // S2 NDVI files are now named YYYYMMDD_ndvi.geotiff
                         const filename = `${date}_ndvi.geotiff`;
                         try {
-                            const res = await fetch(`../data/innsbruck/2024/ndvi/fusion/${filename}`);
+                            const res = await fetch(`../data/innsbruck/2024/prepared/ndvi/s2/${filename}`);
                             if (res.ok) return filename;
                         } catch {}
-                    } else {
-                        for (let i = 0; i < 3; i++) {
-                            const filename = `${date}_${i}.geotiff`;
-                            if (!showCloudsCheckbox.checked && clouds[source] && clouds[source].has(filename)) continue;
-                            try {
-                                const res = await fetch(`../data/innsbruck/2024/ndvi/${source}/${filename}`);
-                                if (res.ok) return filename;
-                            } catch {}
-                        }
+                    } else if (source === "fusion") {
+                        const filename = `${date}_ndvi.geotiff`;
+                        try {
+                            const res = await fetch(`../data/innsbruck/2024/prepared/ndvi/fusion/${filename}`);
+                            if (res.ok) return filename;
+                        } catch {}
+                    } else if (source === "s3") {
+                        const filename = `composite_${date}.geotiff`;
+                        try {
+                            const res = await fetch(`../data/innsbruck/2024/prepared/ndvi/s3/${filename}`);
+                            if (res.ok) return filename;
+                        } catch {}
                     }
                 }
             }
@@ -347,7 +374,6 @@
             dateDisplay.textContent = date;
             const params = new URLSearchParams();
             params.set("date", date);
-            if (!showCloudsCheckbox.checked) params.set("hideClouds", "1");
             history.replaceState({}, "", `?${params}`);
             drawTimeseries();
             for (const source of ["s2", "fusion", "s3"]) {
@@ -362,7 +388,7 @@
                 const ndviFilename = await findNDVIFile(date, source);
                 if (ndviFilename) {
                     try {
-                        await loadNDVI(source, ndviFilename);
+                        await loadNDVI(source, ndviFilename, date);
                     } catch (e) {
                         console.error(`Error loading NDVI ${source}:`, e);
                     }
@@ -373,9 +399,7 @@
         const urlParams = new URLSearchParams(location.search);
         const urlDate = urlParams.get("date");
         if (urlDate) slider.value = daysFromDate(urlDate);
-        if (urlParams.get("hideClouds") === "1") showCloudsCheckbox.checked = false;
         slider.addEventListener("input", updateImages);
-        showCloudsCheckbox.addEventListener("change", updateImages);
         loadTimeseries().then(updateImages);
     </script>
 </body>
