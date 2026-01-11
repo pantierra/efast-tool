@@ -1,4 +1,5 @@
 from pathlib import Path
+from datetime import datetime
 import numpy as np
 import rasterio
 from rasterio import windows
@@ -66,15 +67,46 @@ def process_cropped(season, site_position, site_name):
     
     print(f"[PROCESS] Cropping files to fusion valid data bounds: {site_name}, {season}")
     
+    # Collect all available DIST_CLOUD files and their dates
+    dist_cloud_files = {}
+    for dist_cloud_file in s2_prep.glob("S2A_MSIL2A_*_DIST_CLOUD.tif"):
+        date_str = dist_cloud_file.stem.split("_")[2]
+        try:
+            date_obj = datetime.strptime(date_str, "%Y%m%d")
+            dist_cloud_files[date_obj] = dist_cloud_file
+        except ValueError:
+            continue
+    
+    if not dist_cloud_files:
+        print("[PROCESS] Warning: No DIST_CLOUD files found. Cannot process fusion files.")
+        return
+    
+    dist_cloud_dates = sorted(dist_cloud_files.keys())
+    
+    def find_closest_dist_cloud(target_date_str):
+        """Find the closest DIST_CLOUD file to the target date."""
+        try:
+            target_date = datetime.strptime(target_date_str, "%Y%m%d")
+        except ValueError:
+            return None
+        
+        # Find closest date
+        closest_date = min(dist_cloud_dates, key=lambda d: abs((d - target_date).days))
+        return dist_cloud_files[closest_date]
+    
     # Determine valid bounds for each fusion file
     fusion_bounds = {}
     fusion_rows = {}
     
     for fusion_file in fusion_prep.glob("REFL_*.tif"):
         date_str = fusion_file.stem.split("_")[1]
+        
+        # Try exact date first, then find closest
         dist_cloud = s2_prep / f"S2A_MSIL2A_{date_str}_DIST_CLOUD.tif"
         if not dist_cloud.exists():
-            continue
+            dist_cloud = find_closest_dist_cloud(date_str)
+            if dist_cloud is None:
+                continue
         
         with rasterio.open(dist_cloud) as dist_src:
             dist_bounds = dist_src.bounds

@@ -219,17 +219,30 @@
         
         async function findFile(dateStr, source) {
             const target = new Date(dateStr);
-            for (let offset = 0; offset < 15; offset++) {
-                for (const dir of [0, -1, 1]) {
-                    const d = new Date(target);
-                    d.setDate(d.getDate() + offset * dir);
-                    const date = d.toISOString().split("T")[0].replace(/-/g, "");
-                    // Processed files use DATE_0.geotiff format
+            // Search outward from target date (0, ±1, ±2, ±3, ...) until we find the closest file
+            // Check dates in order: exact, then -1, +1, then -2, +2, etc.
+            // Limit to ±365 days to avoid infinite search
+            for (let offset = 0; offset <= 365; offset++) {
+                // Check exact date first (offset=0)
+                if (offset === 0) {
+                    const date = target.toISOString().split("T")[0].replace(/-/g, "");
                     const filename = `${date}_0.geotiff`;
                     try {
                         const res = await fetch(`../data/innsbruck/2024/processed/${source}/${filename}`);
                         if (res.ok) return filename;
                     } catch {}
+                } else {
+                    // Check -offset and +offset days
+                    for (const dir of [-1, 1]) {
+                        const d = new Date(target);
+                        d.setDate(d.getDate() + offset * dir);
+                        const date = d.toISOString().split("T")[0].replace(/-/g, "");
+                        const filename = `${date}_0.geotiff`;
+                        try {
+                            const res = await fetch(`../data/innsbruck/2024/processed/${source}/${filename}`);
+                            if (res.ok) return filename;
+                        } catch {}
+                    }
                 }
             }
             return null;
@@ -286,7 +299,7 @@
             overlays[source] = L.imageOverlay(canvas.toDataURL(), bounds, { opacity: 0.95 }).addTo(maps[source]);
             maps[source].fitBounds(bounds);
             
-            // Processed files use DATE_0.geotiff format: 20240101_0.geotiff -> extract 20240101
+            // Extract date from filename to show the actual date of the file found (closest available date)
             const dateStr = filename.split("_")[0];
             const date = `${dateStr.slice(0,4)}-${dateStr.slice(4,6)}-${dateStr.slice(6,8)}`;
             document.getElementById(`${source}rgbdate`).textContent = date;
@@ -329,7 +342,7 @@
             ndviOverlays[source] = L.imageOverlay(canvas.toDataURL(), bounds, { opacity: 0.95 }).addTo(ndvimaps[source]);
             ndvimaps[source].fitBounds(bounds);
             
-            // Processed NDVI files use DATE_0_ndvi.geotiff format: 20240101_0_ndvi.geotiff -> extract 20240101
+            // Extract date from filename to show the actual date of the file found (closest available date)
             const extractedDateStr = filename.split("_")[0];
             const date = `${extractedDateStr.slice(0,4)}-${extractedDateStr.slice(4,6)}-${extractedDateStr.slice(6,8)}`;
             document.getElementById(`${source}ndvidate`).textContent = date;
@@ -344,17 +357,30 @@
         
         async function findNDVIFile(dateStr, source) {
             const target = new Date(dateStr);
-            for (let offset = 0; offset < 15; offset++) {
-                for (const dir of [0, -1, 1]) {
-                    const d = new Date(target);
-                    d.setDate(d.getDate() + offset * dir);
-                    const date = d.toISOString().split("T")[0].replace(/-/g, "");
-                    // Processed NDVI files use DATE_0_ndvi.geotiff format
+            // Search outward from target date (0, ±1, ±2, ±3, ...) until we find the closest file
+            // Check dates in order: exact, then -1, +1, then -2, +2, etc.
+            // Limit to ±365 days to avoid infinite search
+            for (let offset = 0; offset <= 365; offset++) {
+                // Check exact date first (offset=0)
+                if (offset === 0) {
+                    const date = target.toISOString().split("T")[0].replace(/-/g, "");
                     const filename = `${date}_0_ndvi.geotiff`;
                     try {
                         const res = await fetch(`../data/innsbruck/2024/processed/ndvi/${source}/${filename}`);
                         if (res.ok) return filename;
                     } catch {}
+                } else {
+                    // Check -offset and +offset days
+                    for (const dir of [-1, 1]) {
+                        const d = new Date(target);
+                        d.setDate(d.getDate() + offset * dir);
+                        const date = d.toISOString().split("T")[0].replace(/-/g, "");
+                        const filename = `${date}_0_ndvi.geotiff`;
+                        try {
+                            const res = await fetch(`../data/innsbruck/2024/processed/ndvi/${source}/${filename}`);
+                            if (res.ok) return filename;
+                        } catch {}
+                    }
                 }
             }
             return null;
