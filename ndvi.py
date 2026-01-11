@@ -126,6 +126,10 @@ def _process_ndvi_files(
         return
 
     for geotiff_file in geotiff_files:
+        # Skip DIST_CLOUD files silently (single-band distance-to-clouds, not suitable for NDVI)
+        if "DIST_CLOUD" in geotiff_file.name:
+            continue
+
         # Check if file has enough bands (need at least 4 for RED and NIR)
         try:
             with rasterio.open(geotiff_file) as src:

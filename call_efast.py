@@ -148,8 +148,47 @@ def prepare_s3(season, site_position, site_name, date_range=None):
             with rasterio.open(composite_path, "w", **profile) as dst:
                 dst.write(composite)
 
-    _, _, reproject_and_crop_s3 = _import_efast()
-    reproject_and_crop_s3(temp_composite_dir, s2_prepared_dir, s3_preprocessed_dir)
+    # Reproject S3 to match S2 REFL bounds (full coverage) instead of DIST_CLOUD bounds
+    # This ensures fusion covers the same area as S2 and dimensions match
+    sen2_ref_paths = list(s2_prepared_dir.glob("*REFL.tif"))
+    if len(sen2_ref_paths) == 0:
+        raise ValueError(f"No REFL files found in {s2_prepared_dir}")
+
+    # Get bounds from REFL file (full coverage, matches S2)
+    with rasterio.open(sen2_ref_paths[0]) as s2_ref:
+        target_bounds = s2_ref.bounds
+        target_crs = s2_ref.crs
+        s2_resolution = abs(s2_ref.transform[0])
+        s3_resolution = s2_resolution * RESOLUTION_RATIO
+        width = int((target_bounds.right - target_bounds.left) / s3_resolution)
+        height = int((target_bounds.top - target_bounds.bottom) / s3_resolution)
+        s3_transform = rasterio.transform.from_bounds(
+            target_bounds.left,
+            target_bounds.bottom,
+            target_bounds.right,
+            target_bounds.top,
+            width,
+            height,
+        )
+
+    # Reproject each S3 composite to match S2 REFL bounds
+    sen3_paths = list(temp_composite_dir.glob("*.tif"))
+    for sen3_path in sen3_paths:
+        vrt_options = {
+            "transform": s3_transform,
+            "height": height,
+            "width": width,
+            "crs": target_crs,
+            "resampling": Resampling.cubic,
+        }
+        with rasterio.open(sen3_path) as s3_src:
+            with WarpedVRT(s3_src, **vrt_options) as vrt:
+                name = sen3_path.name
+                outfile = s3_preprocessed_dir / name
+                profile = vrt.profile.copy()
+                profile.update({"dtype": "float32", "nodata": 0, "driver": "GTiff"})
+                rio_shutil.copy(vrt, outfile, **profile)
+
     shutil.rmtree(temp_composite_dir)
 
 

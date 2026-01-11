@@ -1,4 +1,5 @@
 import os
+import time
 from pathlib import Path
 from datetime import datetime
 from dotenv import load_dotenv
@@ -11,7 +12,7 @@ from rasterio.transform import from_bounds
 
 load_dotenv()
 
-BBOX_SIZE = 0.011
+BBOX_SIZE = 0.016  # Larger than S2 to ensure full coverage including padded pixels
 
 
 def _get_bbox(lon, lat):
@@ -131,10 +132,28 @@ def download_s3(season, site_position, site_name, date_range=None):
     ).resample_spatial(projection=32632)
 
     output_file = output_dir / "s3_data.nc"
-    print("[S3] Downloading NetCDF...")
-    datacube.download(str(output_file), format="NetCDF")
+    print(f"[S3] Downloading NetCDF to {output_file}...")
+    print(f"[S3] Temporal extent: {start_date} to {end_date}")
+    print(f"[S3] Spatial extent: {spatial_extent}")
+    print(f"[S3] Bands: {openeo_bands}")
+    print("[S3] This may take several minutes depending on data volume...")
+
+    start_time = time.time()
+    try:
+        datacube.download(str(output_file), format="NetCDF")
+        elapsed = time.time() - start_time
+        print(f"[S3] Download completed in {elapsed:.1f} seconds")
+    except Exception as e:
+        elapsed = time.time() - start_time
+        print(f"[S3] Download failed after {elapsed:.1f} seconds: {e}")
+        raise
 
     print("[S3] Processing NetCDF...")
+    process_start = time.time()
     _process_netcdf(output_file, output_dir, bands, openeo_bands)
+    process_elapsed = time.time() - process_start
+    print(f"[S3] Processing completed in {process_elapsed:.1f} seconds")
+
+    print(f"[S3] Removing temporary NetCDF file...")
     os.remove(output_file)
     print("[S3] Completed")
