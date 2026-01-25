@@ -18,6 +18,7 @@
         .phenocam-date { font-size: 11px; margin-top: 5px; color: #999; }
         .phenocam-image { width: 100%; height: 200px; object-fit: contain; border: 1px solid #ccc; }
         .sitemap { height: 200px; border: 1px solid #ccc; margin-top: 32px; }
+        #greennesstimeseries { margin-top: 0; }
         #dateSlider { width: 100%; }
         #dateDisplay { text-align: center; margin: 10px 0; font-size: 18px; }
         .maps { display: flex; gap: 20px; }
@@ -42,11 +43,13 @@
             <div class="header-col site-info">
                 <h1 id="siteName">Innsbruck</h1>
                 <h2 id="season">2024</h2>
-            </div>
-            <div class="header-col">
                 <div class="phenocam-label">PhenoCam</div>
                 <div id="phenocamdate" class="phenocam-date"></div>
                 <img id="phenocamimage" class="phenocam-image" alt="PhenoCam">
+            </div>
+            <div class="header-col">
+                <div class="timeseries-label">Greenness Index Timeseries</div>
+                <canvas id="greennesstimeseries" class="timeseries"></canvas>
             </div>
             <div class="header-col">
                 <div id="sitemap" class="sitemap"></div>
@@ -116,6 +119,7 @@
         const markers = { s2: null, fusion: null, s3: null };
         const ndviMarkers = { s2: null, fusion: null, s3: null };
         let timeseries = { s2: [], fusion: [], s3: [] };
+        let greennessTimeseries = [];
         
         // Add site marker to all maps
         for (const source of ["s2", "fusion", "s3"]) {
@@ -140,13 +144,84 @@
         });
         
         async function loadTimeseries() {
-            const [s2, fusion, s3] = await Promise.all([
+            const [s2, fusion, s3, greenness] = await Promise.all([
                 fetch("../data/innsbruck/2024/processed/ndvi/s2/timeseries.json").then(r => r.json()),
                 fetch("../data/innsbruck/2024/processed/ndvi/fusion/timeseries.json").then(r => r.json()).catch(() => []),
-                fetch("../data/innsbruck/2024/processed/ndvi/s3/timeseries.json").then(r => r.json())
+                fetch("../data/innsbruck/2024/processed/ndvi/s3/timeseries.json").then(r => r.json()),
+                fetch("../data/innsbruck/2024/raw/phenocam/timeseries.json").then(r => r.json()).catch(() => [])
             ]);
             timeseries = { s2, fusion, s3 };
+            greennessTimeseries = greenness;
             drawTimeseries();
+            drawGreennessTimeseries();
+        }
+        
+        function drawGreennessTimeseries() {
+            const canvas = document.getElementById("greennesstimeseries");
+            const ctx = canvas.getContext("2d");
+            canvas.width = canvas.offsetWidth;
+            canvas.height = 120;
+            const w = canvas.width, h = canvas.height;
+            const pad = 30;
+            const plotW = w - pad * 2, plotH = h - pad * 2;
+            
+            ctx.clearRect(0, 0, w, h);
+            const data = greennessTimeseries.filter(t => t.date && t.greenness_index !== null && t.greenness_index !== undefined);
+            if (!data.length) return;
+            
+            const dates = data.map(t => new Date(t.date));
+            const minDate = new Date(Math.min(...dates));
+            const maxDate = new Date(Math.max(...dates));
+            const dateRange = maxDate - minDate || 1;
+            
+            const values = data.map(t => t.greenness_index);
+            const minVal = Math.min(...values);
+            const maxVal = Math.max(...values);
+            const valRange = maxVal - minVal || 1;
+            
+            const x = (d) => pad + ((new Date(d) - minDate) / dateRange) * plotW;
+            const y = (v) => pad + plotH - ((v - minVal) / valRange) * plotH;
+            
+            ctx.strokeStyle = "#ccc";
+            ctx.beginPath();
+            ctx.moveTo(pad, pad);
+            ctx.lineTo(pad, pad + plotH);
+            ctx.lineTo(pad + plotW, pad + plotH);
+            ctx.stroke();
+            
+            ctx.fillStyle = "#000";
+            ctx.font = "9px sans-serif";
+            ctx.fillText(minVal.toFixed(3), 2, pad + plotH + 10);
+            ctx.fillText(maxVal.toFixed(3), 2, pad + 3);
+            
+            ctx.strokeStyle = "#00aa00";
+            ctx.beginPath();
+            let first = true;
+            for (const t of data) {
+                const px = x(t.date), py = y(t.greenness_index);
+                if (first) { ctx.moveTo(px, py); first = false; }
+                else ctx.lineTo(px, py);
+            }
+            ctx.stroke();
+            
+            const currentDate = dateFromDays(parseInt(slider.value));
+            const xPos = x(currentDate);
+            ctx.strokeStyle = "#f00";
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(xPos, pad);
+            ctx.lineTo(xPos, pad + plotH);
+            ctx.stroke();
+            
+            const closest = data.reduce((c, t) => 
+                Math.abs(new Date(t.date) - new Date(currentDate)) < Math.abs(new Date(c.date) - new Date(currentDate)) ? t : c
+            );
+            if (closest && closest.greenness_index !== null) {
+                const yPos = y(closest.greenness_index);
+                ctx.fillStyle = "#f00";
+                ctx.font = "bold 10px sans-serif";
+                ctx.fillText(closest.greenness_index.toFixed(3), xPos + 5, yPos - 5);
+            }
         }
         
         function drawTimeseries() {
@@ -430,6 +505,7 @@
             params.set("date", date);
             history.replaceState({}, "", `?${params}`);
             drawTimeseries();
+            drawGreennessTimeseries();
             for (const source of ["s2", "fusion", "s3"]) {
                 const filename = await findFile(date, source);
                 if (filename) {

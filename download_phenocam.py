@@ -1,7 +1,10 @@
+import csv
+import json
 import requests
 from pathlib import Path
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from io import StringIO
 
 PHENOCAM_API = "https://phenocam.nau.edu/api"
 
@@ -143,4 +146,71 @@ def download_phenocam(season, site_position, site_name, date_range=None):
                 print(f"[PhenoCam] {result}")
 
     print("[PhenoCam] Completed")
+
+
+def download_phenocam_greenness(season, site_position, site_name, date_range=None):
+    """Fetch greenness-index time series from PhenoCam API."""
+    datetime_range = date_range or f"{season}-01-01/{season}-12-31"
+    output_file = Path(f"data/{site_name}/{season}/raw/phenocam/timeseries.json")
+    output_file.parent.mkdir(parents=True, exist_ok=True)
+    
+    start_date, end_date = datetime_range.split("/")
+    start_dt = datetime.strptime(start_date, "%Y-%m-%d")
+    end_dt = datetime.strptime(end_date, "%Y-%m-%d")
+    
+    print(f"[PhenoCam-GI] Fetching greenness-index time series: {site_name}, {season}")
+    
+    # Get ROIs for site (paginate through results)
+    try:
+        url = f"{PHENOCAM_API}/roilists/"
+        params = {"site": site_name}
+        rois = []
+        while url:
+            r = requests.get(url, params=params, timeout=30)
+            r.raise_for_status()
+            data = r.json()
+            rois.extend([roi for roi in data.get("results", []) if roi["site"] == site_name])
+            url = data.get("next")
+            params = None
+            if len(rois) > 0:
+                break
+        if not rois:
+            print(f"[PhenoCam-GI] No ROIs found for site '{site_name}'")
+            return
+        csv_url = rois[0].get("one_day_summary")
+        if not csv_url:
+            print(f"[PhenoCam-GI] No CSV data URL found for ROI")
+            return
+    except requests.exceptions.RequestException as e:
+        print(f"[PhenoCam-GI] Error fetching ROIs: {e}")
+        return
+    
+    # Fetch CSV data
+    try:
+        csv_r = requests.get(csv_url, timeout=30)
+        csv_r.raise_for_status()
+        lines = [l for l in csv_r.text.split('\n') if l and not l.startswith('#')]
+        reader = csv.DictReader(lines)
+        timeseries = []
+        for row in reader:
+            try:
+                date_str = row.get("date")
+                if not date_str:
+                    continue
+                date = datetime.strptime(date_str, "%Y-%m-%d")
+                if start_dt <= date <= end_dt:
+                    gcc = row.get("gcc_mean")
+                    if gcc and gcc != "NA":
+                        timeseries.append({"date": date.isoformat(), "greenness_index": float(gcc)})
+            except (ValueError, KeyError):
+                continue
+    except requests.exceptions.RequestException as e:
+        print(f"[PhenoCam-GI] Error fetching CSV: {e}")
+        return
+    
+    timeseries.sort(key=lambda x: x["date"])
+    with open(output_file, "w") as f:
+        json.dump(timeseries, f, indent=2)
+    
+    print(f"[PhenoCam-GI] Saved: {output_file} ({len(timeseries)} entries)")
 
