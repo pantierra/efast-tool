@@ -107,6 +107,7 @@ def _create_timeseries_for_dir(output_dir, site_position, source_name):
         timeseries.append({"date": date, "filename": filename, "ndvi": ndvi_value})
 
     timeseries.sort(key=lambda x: x["date"])
+    output_dir.mkdir(parents=True, exist_ok=True)
     timeseries_file = output_dir / "timeseries.json"
     with open(timeseries_file, "w") as f:
         json.dump(timeseries, f, indent=2)

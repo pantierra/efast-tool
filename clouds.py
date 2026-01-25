@@ -25,6 +25,11 @@ def detect_clouds(season, site_name):
         with open(timeseries_file) as f:
             timeseries = json.load(f)
 
+        # Flag entries with ndvi: None as outliers (bad/invalid data)
+        for e in timeseries:
+            if e.get("ndvi") is None:
+                clouds[source].append(e["filename"])
+
         entries = [
             (e, datetime.fromisoformat(e["date"].replace("Z", "+00:00")))
             for e in timeseries
