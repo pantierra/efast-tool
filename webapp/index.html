@@ -208,6 +208,9 @@
                     else ctx.lineTo(px, py);
                 }
                 ctx.stroke();
+                ctx.fillStyle = "#888";
+                const axisY = pad + plotH;
+                for (const t of data) ctx.fillRect(x(t.date) - 1, axisY - 1, 2, 2);
                 
                 const xPos = x(currentDate);
                 ctx.strokeStyle = "#f00";
@@ -276,6 +279,9 @@
                 else ctx.lineTo(px, py);
             }
             ctx.stroke();
+            ctx.fillStyle = "#888";
+            const axisY = pad + plotH;
+            for (const t of data) ctx.fillRect(x(t.date) - 1, axisY - 1, 2, 2);
             
             const currentDate = dateFromDays(parseInt(slider.value));
             const xPos = x(currentDate);
@@ -360,6 +366,10 @@
                 ctx.stroke();
             }
             
+            ctx.fillStyle = "#888";
+            const axisY = pad + plotH;
+            for (const t of [...s2data, ...fusiondata]) ctx.fillRect(x(t.date) - 1, axisY - 1, 2, 2);
+            
             const currentDate = dateFromDays(parseInt(slider.value));
             const xPos = x(currentDate);
             ctx.strokeStyle = "#f00";
@@ -430,6 +440,9 @@
                     else ctx.lineTo(px, py);
                 }
                 ctx.stroke();
+                ctx.fillStyle = "#888";
+                const axisY = pad + plotH;
+                for (const t of data) ctx.fillRect(x(t.date) - 1, axisY - 1, 2, 2);
                 
                 const xPos = x(currentDate);
                 ctx.strokeStyle = "#f00";
