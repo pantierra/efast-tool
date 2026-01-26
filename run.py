@@ -5,6 +5,8 @@ from ndvi import (
     create_ndvi_timeseries_raw,
     generate_ndvi_post_process,
     create_ndvi_timeseries_post_process,
+    generate_gcc_post_process,
+    create_gcc_timeseries_post_process,
 )
 from download_s2 import download_s2
 from download_s3 import download_s3
@@ -18,7 +20,7 @@ def run_pipeline(season, site_position, site_name):
         # download_s2(season, site_position, site_name)
         # download_s3(season, site_position, site_name)
         # download_phenocam(season, site_position, site_name)
-        download_phenocam_greenness(season, site_position, site_name)
+        #download_phenocam_greenness(season, site_position, site_name)
 
         # print(f"Generating NDVI for raw data: {site_name}, {season}")
         # generate_ndvi_raw(season, site_position, site_name)
@@ -39,6 +41,9 @@ def run_pipeline(season, site_position, site_name):
         #print(f"Generating NDVI for final outputs: {site_name}, {season}")
         #generate_ndvi_post_process(season, site_position, site_name)
         #create_ndvi_timeseries_post_process(season, site_position, site_name)
+        #print(f"Generating GCC for final outputs: {site_name}, {season}")
+        generate_gcc_post_process(season, site_position, site_name)
+        create_gcc_timeseries_post_process(season, site_position, site_name)
 
     except Exception as e:
         print(f"Error: {e}")

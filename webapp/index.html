@@ -29,6 +29,9 @@
         .map-label { font-size: 12px; margin-bottom: 5px; color: #666; }
         .map-date { font-size: 11px; margin-top: 5px; color: #999; }
         .map { height: 500px; border: 1px solid #ccc; }
+        .combined-plot { margin-top: 20px; }
+        .combined-plot-label { font-size: 12px; margin-bottom: 5px; color: #666; }
+        .combined-plot-canvas { width: 100%; height: 120px; border: 1px solid #ccc; }
         .leaflet-image-layer { image-rendering: pixelated; }
         .leaflet-control-attribution { display: none; }
     </style>
@@ -60,35 +63,36 @@
                 <h3>S2</h3>
                 <div class="timeseries-label">NDVI Timeseries</div>
                 <canvas id="s2timeseries" class="timeseries"></canvas>
+                <div class="timeseries-label">Greenness Index Timeseries</div>
+                <canvas id="s2gcctimeseries" class="timeseries"></canvas>
                 <div class="map-label">RGB Composite</div>
                 <div id="s2rgbdate" class="map-date"></div>
                 <div id="s2map" class="map"></div>
-                <div class="map-label">NDVI</div>
-                <div id="s2ndvidate" class="map-date"></div>
-                <div id="s2ndvimap" class="map"></div>
             </div>
             <div class="map-container">
                 <h3>Fusion</h3>
                 <div class="timeseries-label">NDVI Timeseries</div>
                 <canvas id="fusiontimeseries" class="timeseries"></canvas>
+                <div class="timeseries-label">Greenness Index Timeseries</div>
+                <canvas id="fusiongcctimeseries" class="timeseries"></canvas>
                 <div class="map-label">RGB Composite</div>
                 <div id="fusionrgbdate" class="map-date"></div>
                 <div id="fusionmap" class="map"></div>
-                <div class="map-label">NDVI</div>
-                <div id="fusionndvidate" class="map-date"></div>
-                <div id="fusionndvimap" class="map"></div>
             </div>
             <div class="map-container">
                 <h3>S3</h3>
                 <div class="timeseries-label">NDVI Timeseries</div>
                 <canvas id="s3timeseries" class="timeseries"></canvas>
+                <div class="timeseries-label">Greenness Index Timeseries</div>
+                <canvas id="s3gcctimeseries" class="timeseries"></canvas>
                 <div class="map-label">RGB Composite</div>
                 <div id="s3rgbdate" class="map-date"></div>
                 <div id="s3map" class="map"></div>
-                <div class="map-label">NDVI</div>
-                <div id="s3ndvidate" class="map-date"></div>
-                <div id="s3ndvimap" class="map"></div>
             </div>
+        </div>
+        <div class="combined-plot">
+            <div class="combined-plot-label">Greenness Index Timeseries (S2 & Fusion)</div>
+            <canvas id="combinedgcctimeseries" class="combined-plot-canvas"></canvas>
         </div>
     </div>
     <script>
@@ -109,26 +113,19 @@
             fusion: L.map("fusionmap", mapOpts).setView(sitePosition, 12).addLayer(L.tileLayer(osmUrl, osmOpts)),
             s3: L.map("s3map", mapOpts).setView(sitePosition, 12).addLayer(L.tileLayer(osmUrl, osmOpts))
         };
-        const ndvimaps = {
-            s2: L.map("s2ndvimap", mapOpts).setView(sitePosition, 12).addLayer(L.tileLayer(osmUrl, osmOpts)),
-            fusion: L.map("fusionndvimap", mapOpts).setView(sitePosition, 12).addLayer(L.tileLayer(osmUrl, osmOpts)),
-            s3: L.map("s3ndvimap", mapOpts).setView(sitePosition, 12).addLayer(L.tileLayer(osmUrl, osmOpts))
-        };
         const overlays = { s2: null, fusion: null, s3: null };
-        const ndviOverlays = { s2: null, fusion: null, s3: null };
         const markers = { s2: null, fusion: null, s3: null };
-        const ndviMarkers = { s2: null, fusion: null, s3: null };
         let timeseries = { s2: [], fusion: [], s3: [] };
-        let greennessTimeseries = [];
+        let greennessTimeseries = { s2: [], fusion: [], s3: [] };
+        let phenocamGreennessTimeseries = [];
         
         // Add site marker to all maps
         for (const source of ["s2", "fusion", "s3"]) {
             markers[source] = L.marker(sitePosition, { icon: L.divIcon({ className: "site-marker", html: "<div style='width:5px;height:5px;background:red;border:1px solid white;border-radius:50%;box-shadow:0 0 1px rgba(0,0,0,0.5);'></div>", iconSize: [5, 5] }) }).addTo(maps[source]);
-            ndviMarkers[source] = L.marker(sitePosition, { icon: L.divIcon({ className: "site-marker", html: "<div style='width:5px;height:5px;background:red;border:1px solid white;border-radius:50%;box-shadow:0 0 1px rgba(0,0,0,0.5);'></div>", iconSize: [5, 5] }) }).addTo(ndvimaps[source]);
         }
         
         let syncing = false;
-        const allMaps = Object.values(maps).concat(Object.values(ndvimaps));
+        const allMaps = Object.values(maps);
         const syncMaps = (sourceMap) => {
             if (syncing) return;
             syncing = true;
@@ -144,19 +141,95 @@
         });
         
         async function loadTimeseries() {
-            const [s2, fusion, s3, greenness] = await Promise.all([
+            const [s2, fusion, s3, s2gcc, fusiongcc, s3gcc, phenocam] = await Promise.all([
                 fetch("../data/innsbruck/2024/processed/ndvi/s2/timeseries.json").then(r => r.json()),
                 fetch("../data/innsbruck/2024/processed/ndvi/fusion/timeseries.json").then(r => r.json()).catch(() => []),
                 fetch("../data/innsbruck/2024/processed/ndvi/s3/timeseries.json").then(r => r.json()),
+                fetch("../data/innsbruck/2024/processed/gcc/s2/timeseries.json").then(r => r.json()).catch(() => []),
+                fetch("../data/innsbruck/2024/processed/gcc/fusion/timeseries.json").then(r => r.json()).catch(() => []),
+                fetch("../data/innsbruck/2024/processed/gcc/s3/timeseries.json").then(r => r.json()).catch(() => []),
                 fetch("../data/innsbruck/2024/raw/phenocam/timeseries.json").then(r => r.json()).catch(() => [])
             ]);
             timeseries = { s2, fusion, s3 };
-            greennessTimeseries = greenness;
+            greennessTimeseries = { s2: s2gcc, fusion: fusiongcc, s3: s3gcc };
+            phenocamGreennessTimeseries = phenocam;
             drawTimeseries();
             drawGreennessTimeseries();
+            drawPhenocamGreennessTimeseries();
+            drawCombinedGreennessTimeseries();
         }
         
         function drawGreennessTimeseries() {
+            const currentDate = dateFromDays(parseInt(slider.value));
+            for (const source of ["s2", "fusion", "s3"]) {
+                const canvas = document.getElementById(`${source}gcctimeseries`);
+                const ctx = canvas.getContext("2d");
+                canvas.width = canvas.offsetWidth;
+                canvas.height = 120;
+                const w = canvas.width, h = canvas.height;
+                const pad = 30;
+                const plotW = w - pad * 2, plotH = h - pad * 2;
+                
+                ctx.clearRect(0, 0, w, h);
+                let data = greennessTimeseries[source].filter(t => t.date && t.greenness_index !== null && t.greenness_index !== undefined);
+                if (!data.length) continue;
+                
+                const dates = data.map(t => new Date(t.date));
+                const minDate = new Date(Math.min(...dates));
+                const maxDate = new Date(Math.max(...dates));
+                const dateRange = maxDate - minDate || 1;
+                
+                const values = data.map(t => t.greenness_index);
+                const minVal = Math.min(...values);
+                const maxVal = Math.max(...values);
+                const valRange = maxVal - minVal || 1;
+                
+                const x = (d) => pad + ((new Date(d) - minDate) / dateRange) * plotW;
+                const y = (v) => pad + plotH - ((v - minVal) / valRange) * plotH;
+                
+                ctx.strokeStyle = "#ccc";
+                ctx.beginPath();
+                ctx.moveTo(pad, pad);
+                ctx.lineTo(pad, pad + plotH);
+                ctx.lineTo(pad + plotW, pad + plotH);
+                ctx.stroke();
+                
+                ctx.fillStyle = "#000";
+                ctx.font = "9px sans-serif";
+                ctx.fillText(minVal.toFixed(3), 2, pad + plotH + 10);
+                ctx.fillText(maxVal.toFixed(3), 2, pad + 3);
+                
+                ctx.strokeStyle = "#00aa00";
+                ctx.beginPath();
+                let first = true;
+                for (const t of data) {
+                    const px = x(t.date), py = y(t.greenness_index);
+                    if (first) { ctx.moveTo(px, py); first = false; }
+                    else ctx.lineTo(px, py);
+                }
+                ctx.stroke();
+                
+                const xPos = x(currentDate);
+                ctx.strokeStyle = "#f00";
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(xPos, pad);
+                ctx.lineTo(xPos, pad + plotH);
+                ctx.stroke();
+                
+                const closest = data.reduce((c, t) => 
+                    Math.abs(new Date(t.date) - new Date(currentDate)) < Math.abs(new Date(c.date) - new Date(currentDate)) ? t : c
+                );
+                if (closest && closest.greenness_index !== null) {
+                    const yPos = y(closest.greenness_index);
+                    ctx.fillStyle = "#f00";
+                    ctx.font = "bold 10px sans-serif";
+                    ctx.fillText(closest.greenness_index.toFixed(3), xPos + 5, yPos - 5);
+                }
+            }
+        }
+        
+        function drawPhenocamGreennessTimeseries() {
             const canvas = document.getElementById("greennesstimeseries");
             const ctx = canvas.getContext("2d");
             canvas.width = canvas.offsetWidth;
@@ -166,7 +239,7 @@
             const plotW = w - pad * 2, plotH = h - pad * 2;
             
             ctx.clearRect(0, 0, w, h);
-            const data = greennessTimeseries.filter(t => t.date && t.greenness_index !== null && t.greenness_index !== undefined);
+            const data = phenocamGreennessTimeseries.filter(t => t.date && t.greenness_index !== null && t.greenness_index !== undefined);
             if (!data.length) return;
             
             const dates = data.map(t => new Date(t.date));
@@ -224,6 +297,79 @@
             }
         }
         
+        function drawCombinedGreennessTimeseries() {
+            const canvas = document.getElementById("combinedgcctimeseries");
+            const ctx = canvas.getContext("2d");
+            canvas.width = canvas.offsetWidth;
+            canvas.height = 120;
+            const w = canvas.width, h = canvas.height;
+            const pad = 30;
+            const plotW = w - pad * 2, plotH = h - pad * 2;
+            
+            ctx.clearRect(0, 0, w, h);
+            const s2data = greennessTimeseries.s2.filter(t => t.date && t.greenness_index !== null && t.greenness_index !== undefined);
+            const fusiondata = greennessTimeseries.fusion.filter(t => t.date && t.greenness_index !== null && t.greenness_index !== undefined);
+            if (!s2data.length && !fusiondata.length) return;
+            
+            const allDates = [...s2data.map(t => new Date(t.date)), ...fusiondata.map(t => new Date(t.date))];
+            const minDate = new Date(Math.min(...allDates));
+            const maxDate = new Date(Math.max(...allDates));
+            const dateRange = maxDate - minDate || 1;
+            
+            const allValues = [...s2data.map(t => t.greenness_index), ...fusiondata.map(t => t.greenness_index)];
+            const minVal = Math.min(...allValues);
+            const maxVal = Math.max(...allValues);
+            const valRange = maxVal - minVal || 1;
+            
+            const x = (d) => pad + ((new Date(d) - minDate) / dateRange) * plotW;
+            const y = (v) => pad + plotH - ((v - minVal) / valRange) * plotH;
+            
+            ctx.strokeStyle = "#ccc";
+            ctx.beginPath();
+            ctx.moveTo(pad, pad);
+            ctx.lineTo(pad, pad + plotH);
+            ctx.lineTo(pad + plotW, pad + plotH);
+            ctx.stroke();
+            
+            ctx.fillStyle = "#000";
+            ctx.font = "9px sans-serif";
+            ctx.fillText(minVal.toFixed(3), 2, pad + plotH + 10);
+            ctx.fillText(maxVal.toFixed(3), 2, pad + 3);
+            
+            if (s2data.length) {
+                ctx.strokeStyle = "#ff6600";
+                ctx.beginPath();
+                let first = true;
+                for (const t of s2data) {
+                    const px = x(t.date), py = y(t.greenness_index);
+                    if (first) { ctx.moveTo(px, py); first = false; }
+                    else ctx.lineTo(px, py);
+                }
+                ctx.stroke();
+            }
+            
+            if (fusiondata.length) {
+                ctx.strokeStyle = "#9900cc";
+                ctx.beginPath();
+                let first = true;
+                for (const t of fusiondata) {
+                    const px = x(t.date), py = y(t.greenness_index);
+                    if (first) { ctx.moveTo(px, py); first = false; }
+                    else ctx.lineTo(px, py);
+                }
+                ctx.stroke();
+            }
+            
+            const currentDate = dateFromDays(parseInt(slider.value));
+            const xPos = x(currentDate);
+            ctx.strokeStyle = "#f00";
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(xPos, pad);
+            ctx.lineTo(xPos, pad + plotH);
+            ctx.stroke();
+        }
+        
         function drawTimeseries() {
             const currentDate = dateFromDays(parseInt(slider.value));
             for (const source of ["s2", "fusion", "s3"]) {
@@ -275,7 +421,7 @@
                 ctx.fillText(minNdvi.toFixed(2), 2, pad + plotH + 10);
                 ctx.fillText(maxNdvi.toFixed(2), 2, pad + 3);
                 
-                ctx.strokeStyle = source === "s2" ? "#0066ff" : source === "fusion" ? "#00aa00" : "#ff6600";
+                ctx.strokeStyle = "#0066ff";
                 ctx.beginPath();
                 let first = true;
                 for (const t of data) {
@@ -395,86 +541,12 @@
             document.getElementById(`${source}rgbdate`).textContent = date;
         }
         
-        async function loadNDVI(source, filename, dateStr) {
-            const tiff = await GeoTIFF.fromArrayBuffer(await (await fetch(`../data/innsbruck/2024/processed/ndvi/${source}/${filename}`)).arrayBuffer());
-            const image = await tiff.getImage();
-            const data = Array.from((await image.readRasters())[0]);
-            const width = image.getWidth();
-            const height = image.getHeight();
-            const bbox = image.getBoundingBox();
-            const geoKeys = image.getGeoKeys();
-            const crsCode = geoKeys.ProjectedCSTypeGeoKey ? `EPSG:${geoKeys.ProjectedCSTypeGeoKey}` : 
-                          geoKeys.GeographicTypeGeoKey !== 4326 ? `EPSG:${geoKeys.GeographicTypeGeoKey}` : "EPSG:4326";
-            
-            let minVal = Infinity, maxVal = -Infinity;
-            for (const v of data) if (!isNaN(v) && v !== 0) { minVal = Math.min(minVal, v); maxVal = Math.max(maxVal, v); }
-            
-            const canvas = Object.assign(document.createElement("canvas"), { width, height });
-            const ctx = canvas.getContext("2d");
-            ctx.imageSmoothingEnabled = false;
-            const imgData = ctx.createImageData(width, height);
-            
-            for (let i = 0; i < data.length; i++) {
-                const val = data[i];
-                const idx = i * 4;
-                if (val === 0 || isNaN(val)) {
-                    imgData.data[idx + 3] = 0;
-                } else {
-                    const n = ((val - minVal) / (maxVal - minVal || 1)) * 255;
-                    imgData.data[idx] = imgData.data[idx + 1] = imgData.data[idx + 2] = n;
-                    imgData.data[idx + 3] = 255;
-                }
-            }
-            ctx.putImageData(imgData, 0, 0);
-            
-            const bounds = crsCode === "EPSG:4326" ? [[bbox[1], bbox[0]], [bbox[3], bbox[2]]] : transformBounds(bbox, crsCode);
-            if (ndviOverlays[source]) ndvimaps[source].removeLayer(ndviOverlays[source]);
-            ndviOverlays[source] = L.imageOverlay(canvas.toDataURL(), bounds, { opacity: 0.95 }).addTo(ndvimaps[source]);
-            ndvimaps[source].fitBounds(bounds);
-            
-            // Extract date from filename to show the actual date of the file found (closest available date)
-            const extractedDateStr = filename.split("_")[0];
-            const date = `${extractedDateStr.slice(0,4)}-${extractedDateStr.slice(4,6)}-${extractedDateStr.slice(6,8)}`;
-            document.getElementById(`${source}ndvidate`).textContent = date;
-        }
-        
         const fmtDate = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
         const dateFromDays = (days) => fmtDate(new Date(start.getTime() + days * 86400000));
         const daysFromDate = (dateStr) => {
             const [y, m, d] = dateStr.split("-").map(Number);
             return Math.floor((new Date(y, m - 1, d) - start) / 86400000);
         };
-        
-        async function findNDVIFile(dateStr, source) {
-            const target = new Date(dateStr);
-            // Search outward from target date (0, ±1, ±2, ±3, ...) until we find the closest file
-            // Check dates in order: exact, then -1, +1, then -2, +2, etc.
-            // Limit to ±365 days to avoid infinite search
-            for (let offset = 0; offset <= 365; offset++) {
-                // Check exact date first (offset=0)
-                if (offset === 0) {
-                    const date = target.toISOString().split("T")[0].replace(/-/g, "");
-                    const filename = `${date}_0_ndvi.geotiff`;
-                    try {
-                        const res = await fetch(`../data/innsbruck/2024/processed/ndvi/${source}/${filename}`, { method: 'HEAD' });
-                        if (res.ok) return filename;
-                    } catch {}
-                } else {
-                    // Check -offset and +offset days
-                    for (const dir of [-1, 1]) {
-                        const d = new Date(target);
-                        d.setDate(d.getDate() + offset * dir);
-                        const date = d.toISOString().split("T")[0].replace(/-/g, "");
-                        const filename = `${date}_0_ndvi.geotiff`;
-                        try {
-                            const res = await fetch(`../data/innsbruck/2024/processed/ndvi/${source}/${filename}`, { method: 'HEAD' });
-                            if (res.ok) return filename;
-                        } catch {}
-                    }
-                }
-            }
-            return null;
-        }
         
         async function loadPhenoCam(dateStr) {
             const target = new Date(dateStr);
@@ -506,6 +578,8 @@
             history.replaceState({}, "", `?${params}`);
             drawTimeseries();
             drawGreennessTimeseries();
+            drawPhenocamGreennessTimeseries();
+            drawCombinedGreennessTimeseries();
             for (const source of ["s2", "fusion", "s3"]) {
                 const filename = await findFile(date, source);
                 if (filename) {
@@ -513,14 +587,6 @@
                         await loadGeotiff(source, filename);
                     } catch (e) {
                         console.error(`Error loading ${source}:`, e);
-                    }
-                }
-                const ndviFilename = await findNDVIFile(date, source);
-                if (ndviFilename) {
-                    try {
-                        await loadNDVI(source, ndviFilename, date);
-                    } catch (e) {
-                        console.error(`Error loading NDVI ${source}:`, e);
                     }
                 }
             }
