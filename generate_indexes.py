@@ -334,8 +334,11 @@ def _get_gcc_from_original(input_file, site_position):
             
             # Calculate GCC for each pixel in window
             total = red_window + green_window + blue_window
-            mask = (total > 0) & ~np.isnan(total)
+            mask = (total > 0) & ~np.isnan(total) & (blue_window >= 0) & (green_window >= 0) & (red_window >= 0)
             if not np.any(mask):
+                negative_pixels = np.sum((blue_window < 0) | (green_window < 0) | (red_window < 0))
+                if negative_pixels > 0:
+                    print(f"Warning: {input_file.name} excluded - all pixels have negative band values ({negative_pixels} negative pixels in window)")
                 return None
             
             gcc_window = np.zeros_like(green_window, dtype=np.float32)

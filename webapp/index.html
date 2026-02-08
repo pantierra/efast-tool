@@ -105,6 +105,10 @@
             <div class="combined-plot-label">Greenness Index Timeseries (S2 & Fusion)</div>
             <canvas id="combinedgcctimeseries" class="combined-plot-canvas"></canvas>
         </div>
+        <div class="combined-plot">
+            <div class="combined-plot-label">GCC Comparison: All Scenarios</div>
+            <canvas id="scenariosgcctimeseries" class="combined-plot-canvas"></canvas>
+        </div>
     </div>
     <script>
         proj4.defs("EPSG:32632", "+proj=utm +zone=32 +datum=WGS84 +units=m +no_defs");
@@ -127,6 +131,8 @@
         function getFusionPath() {
             return `processed_${strategy}_sigma${sigma}`;
         }
+        
+        let allScenariosGCC = {};
         const siteMap = L.map("sitemap", { zoomControl: false }).setView(sitePosition, 4).addLayer(L.tileLayer(osmUrl, { attribution: "OpenStreetMap", opacity: 1 }));
         L.marker(sitePosition, { icon: L.divIcon({ className: "site-marker", html: "<div style='width:8px;height:8px;background:red;border:2px solid white;border-radius:50%;box-shadow:0 0 2px rgba(0,0,0,0.5);'></div>", iconSize: [8, 8] }) }).addTo(siteMap);
         const maps = {
@@ -175,10 +181,25 @@
             timeseries = { s2, fusion, s3 };
             greennessTimeseries = { s2: s2gcc, fusion: fusiongcc, s3: s3gcc };
             phenocamGreennessTimeseries = phenocam;
+            
+            // Load all scenario GCC timeseries for comparison
+            const scenarios = [
+                { name: "Aggressive σ20", path: "processed_aggressive_sigma20" },
+                { name: "Aggressive σ30", path: "processed_aggressive_sigma30" },
+                { name: "Non-aggressive σ20", path: "processed_nonaggressive_sigma20" },
+                { name: "Non-aggressive σ30", path: "processed_nonaggressive_sigma30" }
+            ];
+            const scenarioPromises = scenarios.map(s => 
+                fetch(`../data/${siteName}/${season}/${s.path}/gcc/fusion/timeseries.json`).then(r => r.json()).catch(() => [])
+            );
+            const scenarioData = await Promise.all(scenarioPromises);
+            scenarios.forEach((s, i) => { allScenariosGCC[s.name] = scenarioData[i]; });
+            
             drawTimeseries();
             drawGreennessTimeseries();
             drawPhenocamGreennessTimeseries();
             drawCombinedGreennessTimeseries();
+            drawScenariosComparison();
         }
         
         function drawGreennessTimeseries() {
@@ -421,6 +442,76 @@
             ctx.stroke();
         }
         
+        function drawScenariosComparison() {
+            const canvas = document.getElementById("scenariosgcctimeseries");
+            const ctx = canvas.getContext("2d");
+            canvas.width = canvas.offsetWidth;
+            canvas.height = 120;
+            const w = canvas.width, h = canvas.height;
+            const pad = 30;
+            const plotW = w - pad * 2, plotH = h - pad * 2;
+            
+            ctx.clearRect(0, 0, w, h);
+            const scenarios = Object.keys(allScenariosGCC);
+            const allData = scenarios.map(name => allScenariosGCC[name].filter(t => t.date && t.greenness_index !== null && t.greenness_index !== undefined));
+            if (!allData.some(d => d.length)) return;
+            
+            const allDates = allData.flatMap(d => d.map(t => new Date(t.date)));
+            const minDate = new Date(Math.min(...allDates));
+            const maxDate = new Date(Math.max(...allDates));
+            const dateRange = maxDate - minDate || 1;
+            
+            const allValues = allData.flatMap(d => d.map(t => t.greenness_index));
+            const minVal = Math.min(...allValues);
+            const maxVal = Math.max(...allValues);
+            const valRange = maxVal - minVal || 1;
+            
+            const x = (d) => pad + ((new Date(d) - minDate) / dateRange) * plotW;
+            const y = (v) => pad + plotH - ((v - minVal) / valRange) * plotH;
+            
+            ctx.strokeStyle = "#ccc";
+            ctx.beginPath();
+            ctx.moveTo(pad, pad);
+            ctx.lineTo(pad, pad + plotH);
+            ctx.lineTo(pad + plotW, pad + plotH);
+            ctx.stroke();
+            
+            ctx.fillStyle = "#000";
+            ctx.font = "9px sans-serif";
+            ctx.fillText(minVal.toFixed(3), 2, pad + plotH + 10);
+            ctx.fillText(maxVal.toFixed(3), 2, pad + 3);
+            
+            const colors = ["#ff6600", "#9900cc", "#0066ff", "#00aa00"];
+            scenarios.forEach((name, i) => {
+                const data = allData[i];
+                if (data.length) {
+                    ctx.strokeStyle = colors[i];
+                    ctx.beginPath();
+                    let first = true;
+                    for (const t of data) {
+                        const px = x(t.date), py = y(t.greenness_index);
+                        if (first) { ctx.moveTo(px, py); first = false; }
+                        else ctx.lineTo(px, py);
+                    }
+                    ctx.stroke();
+                }
+            });
+            
+            const legendX = pad + plotW - 120, legendY = pad + 5;
+            ctx.font = "9px sans-serif";
+            scenarios.forEach((name, i) => {
+                if (allData[i].length) {
+                    ctx.strokeStyle = colors[i];
+                    ctx.beginPath();
+                    ctx.moveTo(legendX, legendY + i * 12);
+                    ctx.lineTo(legendX + 15, legendY + i * 12);
+                    ctx.stroke();
+                    ctx.fillStyle = "#000";
+                    ctx.fillText(name, legendX + 18, legendY + i * 12 + 3);
+                }
+            });
+        }
+        
         function drawTimeseries() {
             const currentDate = dateFromDays(parseInt(slider.value));
             for (const source of ["s2", "fusion", "s3"]) {
@@ -638,6 +729,7 @@
             drawGreennessTimeseries();
             drawPhenocamGreennessTimeseries();
             drawCombinedGreennessTimeseries();
+            drawScenariosComparison();
             for (const source of ["s2", "fusion", "s3"]) {
                 const filename = await findFile(date, source);
                 if (filename) {

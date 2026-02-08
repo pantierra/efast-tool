@@ -28,10 +28,10 @@ def run_pipeline(season, site_position, site_name):
         # print(f"Running EFAST fusion for all scenarios: {site_name}, {season}")
         # run_all_efast_scenarios(season, site_position, site_name)
 
-        print(f"Post-processing data: {site_name}, {season}")
-        process_all_scenarios(season, site_position, site_name)
-        print(f"Generating NDVI for final outputs: {site_name}, {season}")
-        create_ndvi_timeseries_post_process(season, site_position, site_name)
+        # print(f"Post-processing data: {site_name}, {season}")
+        # process_all_scenarios(season, site_position, site_name)  # Already done
+        # print(f"Generating NDVI for final outputs: {site_name}, {season}")
+        # create_ndvi_timeseries_post_process(season, site_position, site_name)  # Already done
         print(f"Generating GCC for final outputs: {site_name}, {season}")
         # generate_gcc_post_process(season, site_position, site_name)  # No-op function
         create_gcc_timeseries_post_process(season, site_position, site_name)
