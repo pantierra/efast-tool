@@ -3,14 +3,14 @@ from pathlib import Path
 from datetime import datetime
 
 WINDOW_DAYS = 14
-NDVI_THRESHOLD = 0.3
-NDVI_DELTA = 0.15
 MIN_WINDOW_SIZE = 3
+THRESHOLDS = {"aggressive": {"threshold": 0.3, "delta": 0.15}, "nonaggressive": {"threshold": 0.2, "delta": 0.25}}
 
 
-def detect_clouds(season, site_name):
-    output_file = Path(f"data/{site_name}/{season}/clouds.json")
+def detect_clouds(season, site_name, cleaning_strategy="aggressive"):
+    output_file = Path(f"data/{site_name}/{season}/clouds_{cleaning_strategy}.json")
     clouds = {"s2": [], "s3": []}
+    thresholds = THRESHOLDS[cleaning_strategy]
 
     for source in ["s2", "s3"]:
         timeseries_file = Path(
@@ -47,9 +47,9 @@ def detect_clouds(season, site_name):
                 continue
 
             max_ndvi = max(window_ndvi)
-            threshold = max_ndvi - NDVI_DELTA
+            threshold = max_ndvi - thresholds["delta"]
 
-            if entry["ndvi"] < threshold and entry["ndvi"] < NDVI_THRESHOLD:
+            if entry["ndvi"] < threshold and entry["ndvi"] < thresholds["threshold"]:
                 clouds[source].append(entry["filename"])
 
         print(

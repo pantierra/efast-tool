@@ -6,20 +6,21 @@ from rasterio.warp import reproject, Resampling
 from rasterio.io import MemoryFile
 
 
-def process_cropped(season, site_position, site_name):
+def process_cropped(season, site_position, site_name, cleaning_strategy="aggressive", sigma=None):
     """Crop fusion to valid data, then crop S2/S3 to match."""
     base = Path(f"data/{site_name}/{season}")
-    prepared = base / "prepared"
-    processed = base / "processed"
+    prepared = base / f"prepared_{cleaning_strategy}"
+    processed_dir = f"processed_{cleaning_strategy}_sigma{sigma}" if sigma else f"processed_{cleaning_strategy}_sigma20"
+    processed = base / processed_dir
     
     s2_prep = prepared / "s2"
     s3_prep = prepared / "s3"
-    fusion_prep = prepared / "fusion"
+    fusion_prep = prepared / (f"fusion_sigma{sigma}" if sigma else "fusion")
     
     for output_dir in [processed / "s2", processed / "s3", processed / "fusion"]:
         output_dir.mkdir(parents=True, exist_ok=True)
     
-    print(f"[PROCESS] Processing files: {site_name}, {season}")
+    print(f"[PROCESS] Processing files: {site_name}, {season}, {cleaning_strategy}, sigma={sigma or 20}")
     
     # Crop fusion to valid data and get dimensions
     fusion_dims = {}
@@ -87,3 +88,10 @@ def process_cropped(season, site_position, site_name):
             print(f"[PROCESS] Cropped: {output_file}")
     
     print("[PROCESS] Completed")
+
+
+def process_all_scenarios(season, site_position, site_name):
+    """Process all 4 EFAST scenarios."""
+    for strategy in ["aggressive", "nonaggressive"]:
+        for sigma in [None, 30]:
+            process_cropped(season, site_position, site_name, cleaning_strategy=strategy, sigma=sigma)

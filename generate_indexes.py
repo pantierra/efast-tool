@@ -235,16 +235,18 @@ def generate_ndvi_post_process(season, site_position, site_name):
 
 
 def create_ndvi_timeseries_post_process(season, site_position, site_name):
-    for source in ["s2", "s3"]:
-        input_dir = Path(f"data/{site_name}/{season}/processed/{source}/")
-        output_dir = Path(f"data/{site_name}/{season}/processed/ndvi/{source}/")
-        _create_timeseries_for_dir(
-            input_dir, output_dir, site_position, f"POST-PROCESS-{source.upper()}"
-        )
-
-    input_dir = Path(f"data/{site_name}/{season}/processed/fusion/")
-    output_dir = Path(f"data/{site_name}/{season}/processed/ndvi/fusion/")
-    _create_timeseries_for_dir(input_dir, output_dir, site_position, "POST-PROCESS-FUSION")
+    for strategy in ["aggressive", "nonaggressive"]:
+        for sigma in [20, 30]:
+            processed_dir = f"processed_{strategy}_sigma{sigma}"
+            for source in ["s2", "s3"]:
+                input_dir = Path(f"data/{site_name}/{season}/{processed_dir}/{source}/")
+                output_dir = Path(f"data/{site_name}/{season}/{processed_dir}/ndvi/{source}/")
+                _create_timeseries_for_dir(
+                    input_dir, output_dir, site_position, f"POST-PROCESS-{source.upper()}-{strategy}-σ{sigma}"
+                )
+            input_dir = Path(f"data/{site_name}/{season}/{processed_dir}/fusion/")
+            output_dir = Path(f"data/{site_name}/{season}/{processed_dir}/ndvi/fusion/")
+            _create_timeseries_for_dir(input_dir, output_dir, site_position, f"POST-PROCESS-FUSION-{strategy}-σ{sigma}")
 
 
 def _calculate_and_write_gcc(input_file, output_file):
@@ -434,13 +436,15 @@ def generate_gcc_post_process(season, site_position, site_name):
 
 
 def create_gcc_timeseries_post_process(season, site_position, site_name):
-    for source in ["s2", "s3"]:
-        input_dir = Path(f"data/{site_name}/{season}/processed/{source}/")
-        output_dir = Path(f"data/{site_name}/{season}/processed/gcc/{source}/")
-        _create_gcc_timeseries_for_dir(
-            input_dir, output_dir, site_position, f"POST-PROCESS-{source.upper()}"
-        )
-
-    input_dir = Path(f"data/{site_name}/{season}/processed/fusion/")
-    output_dir = Path(f"data/{site_name}/{season}/processed/gcc/fusion/")
-    _create_gcc_timeseries_for_dir(input_dir, output_dir, site_position, "POST-PROCESS-FUSION")
+    for strategy in ["aggressive", "nonaggressive"]:
+        for sigma in [20, 30]:
+            processed_dir = f"processed_{strategy}_sigma{sigma}"
+            for source in ["s2", "s3"]:
+                input_dir = Path(f"data/{site_name}/{season}/{processed_dir}/{source}/")
+                output_dir = Path(f"data/{site_name}/{season}/{processed_dir}/gcc/{source}/")
+                _create_gcc_timeseries_for_dir(
+                    input_dir, output_dir, site_position, f"POST-PROCESS-{source.upper()}-{strategy}-σ{sigma}"
+                )
+            input_dir = Path(f"data/{site_name}/{season}/{processed_dir}/fusion/")
+            output_dir = Path(f"data/{site_name}/{season}/{processed_dir}/gcc/fusion/")
+            _create_gcc_timeseries_for_dir(input_dir, output_dir, site_position, f"POST-PROCESS-FUSION-{strategy}-σ{sigma}")

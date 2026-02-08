@@ -36,6 +36,10 @@ def _load_clouds(clouds_file):
     return clouds
 
 
+def _get_base_dir(season, site_name, cleaning_strategy):
+    return Path(f"data/{site_name}/{season}/prepared_{cleaning_strategy}/")
+
+
 def _reproject_raster_to_target(
     src_path,
     dst_path,
@@ -67,11 +71,11 @@ def _reproject_raster_to_target(
             rio_shutil.copy(vrt, dst_path, **profile)
 
 
-def prepare_s2(season, site_position, site_name, date_range=None):
+def prepare_s2(season, site_position, site_name, cleaning_strategy="aggressive", date_range=None):
     s2_dir = Path(f"data/{site_name}/{season}/raw/s2/")
     s3_dir = Path(f"data/{site_name}/{season}/raw/s3/")
-    s2_output_dir = Path(f"data/{site_name}/{season}/prepared/s2/")
-    clouds_file = Path(f"data/{site_name}/{season}/clouds.json")
+    s2_output_dir = _get_base_dir(season, site_name, cleaning_strategy) / "s2"
+    clouds_file = Path(f"data/{site_name}/{season}/clouds_{cleaning_strategy}.json")
 
     clouds = _load_clouds(clouds_file)
     s2_output_dir.mkdir(parents=True, exist_ok=True)
@@ -111,11 +115,12 @@ def prepare_s2(season, site_position, site_name, date_range=None):
     distance_to_clouds(s2_output_dir, ratio=RESOLUTION_RATIO)
 
 
-def prepare_s3(season, site_position, site_name, date_range=None):
+def prepare_s3(season, site_position, site_name, cleaning_strategy="aggressive", date_range=None):
     s3_dir = Path(f"data/{site_name}/{season}/raw/s3/")
-    s2_prepared_dir = Path(f"data/{site_name}/{season}/prepared/s2/")
-    s3_preprocessed_dir = Path(f"data/{site_name}/{season}/prepared/s3/")
-    clouds_file = Path(f"data/{site_name}/{season}/clouds.json")
+    base_dir = _get_base_dir(season, site_name, cleaning_strategy)
+    s2_prepared_dir = base_dir / "s2"
+    s3_preprocessed_dir = base_dir / "s3"
+    clouds_file = Path(f"data/{site_name}/{season}/clouds_{cleaning_strategy}.json")
 
     clouds = _load_clouds(clouds_file)
     s3_preprocessed_dir.mkdir(parents=True, exist_ok=True)
@@ -192,14 +197,14 @@ def prepare_s3(season, site_position, site_name, date_range=None):
     shutil.rmtree(temp_composite_dir)
 
 
-def run_efast(season, site_position, site_name, date_range=None):
+def run_efast(season, site_position, site_name, cleaning_strategy="aggressive", sigma=None, date_range=None):
     lat, lon = site_position
     datetime_range = date_range or f"{season}-01-01/{season}-12-31"
 
-    efast_base_dir = Path(f"data/{site_name}/{season}/prepared/")
+    efast_base_dir = _get_base_dir(season, site_name, cleaning_strategy)
     s2_output_dir = efast_base_dir / "s2"
     s3_output_dir = efast_base_dir / "s3"
-    fusion_output_dir = efast_base_dir / "fusion"
+    fusion_output_dir = efast_base_dir / (f"fusion_sigma{sigma}" if sigma else "fusion")
 
     fusion_output_dir.mkdir(parents=True, exist_ok=True)
     print(f"[EFAST] Starting fusion: {site_name} ({lat:.6f}, {lon:.6f}), {season}")
@@ -215,17 +220,16 @@ def run_efast(season, site_position, site_name, date_range=None):
         date_str = current_date.strftime("%Y%m%d")
         output_file = fusion_output_dir / f"REFL_{date_str}.tif"
         try:
-            efast.fusion(
-                current_date,
-                s3_output_dir,
-                s2_output_dir,
-                fusion_output_dir,
-                product="REFL",
-                max_days=30,
-                date_position=2,
-                minimum_acquisition_importance=0.0,
-                ratio=RESOLUTION_RATIO,
-            )
+            kwargs = {
+                "product": "REFL",
+                "max_days": 30,
+                "date_position": 2,
+                "minimum_acquisition_importance": 0.0,
+                "ratio": RESOLUTION_RATIO,
+            }
+            if sigma is not None:
+                kwargs["sigma"] = sigma
+            efast.fusion(current_date, s3_output_dir, s2_output_dir, fusion_output_dir, **kwargs)
             print(
                 f"[EFAST] Saved: {output_file}"
                 if output_file.exists()
@@ -236,3 +240,14 @@ def run_efast(season, site_position, site_name, date_range=None):
         current_date += timedelta(days=1)
 
     print("[EFAST] Completed")
+
+
+def run_all_efast_scenarios(season, site_position, site_name, sigma_value=30, date_range=None):
+    from clouds import detect_clouds
+    
+    for strategy in ["aggressive", "nonaggressive"]:
+        detect_clouds(season, site_name, cleaning_strategy=strategy)
+        prepare_s2(season, site_position, site_name, cleaning_strategy=strategy, date_range=date_range)
+        prepare_s3(season, site_position, site_name, cleaning_strategy=strategy, date_range=date_range)
+        run_efast(season, site_position, site_name, cleaning_strategy=strategy, sigma=None, date_range=date_range)
+        run_efast(season, site_position, site_name, cleaning_strategy=strategy, sigma=sigma_value, date_range=date_range)

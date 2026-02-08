@@ -9,6 +9,8 @@
     <style>
         body { margin: 0; font-family: sans-serif; }
         .slider-container { position: sticky; top: 0; background: white; padding: 20px; z-index: 1000; border-bottom: 1px solid #ccc; }
+        .scenario-selector { margin-bottom: 10px; }
+        .scenario-selector select { padding: 5px 10px; font-size: 14px; }
         .container { max-width: 1400px; margin: 0 auto; padding: 20px; }
         .header { display: flex; gap: 20px; margin-bottom: 20px; border-bottom: 1px solid #ccc; padding-top: 10px;padding-bottom: 20px;}
         .header-col { flex: 1; }
@@ -58,6 +60,15 @@
                 <div id="sitemap" class="sitemap"></div>
             </div>
         </div>
+        <div class="scenario-selector">
+            <label for="scenarioSelect">Scenario: </label>
+            <select id="scenarioSelect">
+                <option value="aggressive_20">Aggressive (σ=20)</option>
+                <option value="aggressive_30">Aggressive (σ=30)</option>
+                <option value="nonaggressive_20">Non-aggressive (σ=20)</option>
+                <option value="nonaggressive_30">Non-aggressive (σ=30)</option>
+            </select>
+        </div>
         <div class="maps">
             <div class="map-container">
                 <h3>S2</h3>
@@ -106,6 +117,16 @@
         const osmOpts = { attribution: "OpenStreetMap", opacity: 0.4 };
         const mapOpts = { zoomControl: false };
         const sitePosition = [47.116171, 11.320308];
+        const siteName = "innsbruck";
+        const season = "2024";
+        
+        const urlParams = new URLSearchParams(location.search);
+        const strategy = urlParams.get("strategy") || "aggressive";
+        const sigma = urlParams.get("sigma") || "20";
+        
+        function getFusionPath() {
+            return `processed_${strategy}_sigma${sigma}`;
+        }
         const siteMap = L.map("sitemap", { zoomControl: false }).setView(sitePosition, 4).addLayer(L.tileLayer(osmUrl, { attribution: "OpenStreetMap", opacity: 1 }));
         L.marker(sitePosition, { icon: L.divIcon({ className: "site-marker", html: "<div style='width:8px;height:8px;background:red;border:2px solid white;border-radius:50%;box-shadow:0 0 2px rgba(0,0,0,0.5);'></div>", iconSize: [8, 8] }) }).addTo(siteMap);
         const maps = {
@@ -141,14 +162,15 @@
         });
         
         async function loadTimeseries() {
+            const fusionPath = getFusionPath();
             const [s2, fusion, s3, s2gcc, fusiongcc, s3gcc, phenocam] = await Promise.all([
-                fetch("../data/innsbruck/2024/processed/ndvi/s2/timeseries.json").then(r => r.json()),
-                fetch("../data/innsbruck/2024/processed/ndvi/fusion/timeseries.json").then(r => r.json()).catch(() => []),
-                fetch("../data/innsbruck/2024/processed/ndvi/s3/timeseries.json").then(r => r.json()),
-                fetch("../data/innsbruck/2024/processed/gcc/s2/timeseries.json").then(r => r.json()).catch(() => []),
-                fetch("../data/innsbruck/2024/processed/gcc/fusion/timeseries.json").then(r => r.json()).catch(() => []),
-                fetch("../data/innsbruck/2024/processed/gcc/s3/timeseries.json").then(r => r.json()).catch(() => []),
-                fetch("../data/innsbruck/2024/raw/phenocam/timeseries.json").then(r => r.json()).catch(() => [])
+                fetch(`../data/${siteName}/${season}/processed_${strategy}_sigma${sigma}/ndvi/s2/timeseries.json`).then(r => r.json()).catch(() => []),
+                fetch(`../data/${siteName}/${season}/${fusionPath}/ndvi/fusion/timeseries.json`).then(r => r.json()).catch(() => []),
+                fetch(`../data/${siteName}/${season}/processed_${strategy}_sigma${sigma}/ndvi/s3/timeseries.json`).then(r => r.json()).catch(() => []),
+                fetch(`../data/${siteName}/${season}/processed_${strategy}_sigma${sigma}/gcc/s2/timeseries.json`).then(r => r.json()).catch(() => []),
+                fetch(`../data/${siteName}/${season}/${fusionPath}/gcc/fusion/timeseries.json`).then(r => r.json()).catch(() => []),
+                fetch(`../data/${siteName}/${season}/processed_${strategy}_sigma${sigma}/gcc/s3/timeseries.json`).then(r => r.json()).catch(() => []),
+                fetch(`../data/${siteName}/${season}/raw/phenocam/timeseries.json`).then(r => r.json()).catch(() => [])
             ]);
             timeseries = { s2, fusion, s3 };
             greennessTimeseries = { s2: s2gcc, fusion: fusiongcc, s3: s3gcc };
@@ -487,6 +509,7 @@
         
         async function findFile(dateStr, source) {
             const target = new Date(dateStr);
+            const basePath = source === "fusion" ? getFusionPath() : `processed_${strategy}_sigma${sigma}`;
             // Search outward from target date (0, ±1, ±2, ±3, ...) until we find the closest file
             // Check dates in order: exact, then -1, +1, then -2, +2, etc.
             // Limit to ±365 days to avoid infinite search
@@ -496,7 +519,7 @@
                     const date = target.toISOString().split("T")[0].replace(/-/g, "");
                     const filename = `${date}_0.geotiff`;
                     try {
-                        const res = await fetch(`../data/innsbruck/2024/processed/${source}/${filename}`, { method: 'HEAD' });
+                        const res = await fetch(`../data/${siteName}/${season}/${basePath}/${source}/${filename}`, { method: 'HEAD' });
                         if (res.ok) return filename;
                     } catch {}
                 } else {
@@ -507,7 +530,7 @@
                         const date = d.toISOString().split("T")[0].replace(/-/g, "");
                         const filename = `${date}_0.geotiff`;
                         try {
-                            const res = await fetch(`../data/innsbruck/2024/processed/${source}/${filename}`, { method: 'HEAD' });
+                            const res = await fetch(`../data/${siteName}/${season}/${basePath}/${source}/${filename}`, { method: 'HEAD' });
                             if (res.ok) return filename;
                         } catch {}
                     }
@@ -522,7 +545,8 @@
         }
         
         async function loadGeotiff(source, filename) {
-            const path = `../data/innsbruck/2024/processed/${source}/${filename}`;
+            const basePath = source === "fusion" ? getFusionPath() : `processed_${strategy}_sigma${sigma}`;
+            const path = `../data/${siteName}/${season}/${basePath}/${source}/${filename}`;
             const tiff = await GeoTIFF.fromArrayBuffer(await (await fetch(path)).arrayBuffer());
             const image = await tiff.getImage();
             const rasters = await image.readRasters();
@@ -587,7 +611,7 @@
                     const d = new Date(target);
                     d.setDate(d.getDate() + offset * dir);
                     const date = d.toISOString().split("T")[0].replace(/-/g, "");
-                    const url = `../data/innsbruck/2024/raw/phenocam/${date}.jpg`;
+                    const url = `../data/${siteName}/${season}/raw/phenocam/${date}.jpg`;
                     try {
                         const res = await fetch(url, { method: 'HEAD' });
                         if (res.ok) {
@@ -607,6 +631,8 @@
             dateDisplay.textContent = date;
             const params = new URLSearchParams();
             params.set("date", date);
+            params.set("strategy", strategy);
+            if (sigma !== "20") params.set("sigma", sigma);
             history.replaceState({}, "", `?${params}`);
             drawTimeseries();
             drawGreennessTimeseries();
@@ -625,7 +651,16 @@
             await loadPhenoCam(date);
         }
         
-        const urlParams = new URLSearchParams(location.search);
+        const scenarioSelect = document.getElementById("scenarioSelect");
+        scenarioSelect.value = `${strategy}_${sigma}`;
+        scenarioSelect.addEventListener("change", function() {
+            const [newStrategy, newSigma] = this.value.split("_");
+            const params = new URLSearchParams(location.search);
+            params.set("strategy", newStrategy);
+            params.set("sigma", newSigma);
+            window.location.search = params.toString();
+        });
+        
         const urlDate = urlParams.get("date");
         if (urlDate) slider.value = daysFromDate(urlDate);
         slider.addEventListener("input", updateImages);

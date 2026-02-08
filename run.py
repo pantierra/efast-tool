@@ -1,5 +1,5 @@
-from call_efast import run_efast, prepare_s2, prepare_s3
-from post_process import process_cropped
+from call_efast import run_all_efast_scenarios
+from post_process import process_all_scenarios
 from generate_indexes import (
     generate_ndvi_raw,
     create_ndvi_timeseries_raw,
@@ -23,26 +23,17 @@ def run_pipeline(season, site_position, site_name):
         #download_phenocam_greenness(season, site_position, site_name)
 
         # print(f"Generating NDVI for raw data: {site_name}, {season}")
-        # generate_ndvi_raw(season, site_position, site_name)
-        create_ndvi_timeseries_raw(season, site_position, site_name)
+        # create_ndvi_timeseries_raw(season, site_position, site_name)
 
-        # print(f"Detecting clouds for {site_name}, {season}")
-        #detect_clouds(season, site_name)
+        # print(f"Running EFAST fusion for all scenarios: {site_name}, {season}")
+        # run_all_efast_scenarios(season, site_position, site_name)
 
-        #print(f"Preparing data for EFAST fusion for {site_name}, {season}")
-        #prepare_s2(season, site_position, site_name)
-        #prepare_s3(season, site_position, site_name)
-
-        #print(f"Running EFAST fusion for {site_name}, {season}")
-        #run_efast(season, site_position, site_name)
-
-        #print(f"Post-processing data: {site_name}, {season}")
-        #process_cropped(season, site_position, site_name)
-        #print(f"Generating NDVI for final outputs: {site_name}, {season}")
-        #generate_ndvi_post_process(season, site_position, site_name)
+        print(f"Post-processing data: {site_name}, {season}")
+        process_all_scenarios(season, site_position, site_name)
+        print(f"Generating NDVI for final outputs: {site_name}, {season}")
         create_ndvi_timeseries_post_process(season, site_position, site_name)
-        #print(f"Generating GCC for final outputs: {site_name}, {season}")
-        generate_gcc_post_process(season, site_position, site_name)
+        print(f"Generating GCC for final outputs: {site_name}, {season}")
+        # generate_gcc_post_process(season, site_position, site_name)  # No-op function
         create_gcc_timeseries_post_process(season, site_position, site_name)
 
     except Exception as e:
