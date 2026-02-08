@@ -87,14 +87,23 @@ def _get_ndvi_from_original(input_file, site_position):
             if row < 0 or row >= src.height or col < 0 or col >= src.width:
                 return None
             
-            r_val = float(red[row, col])
-            n_val = float(nir[row, col])
+            # Extract 3x3 window with boundary handling
+            r0, r1 = max(0, row - 1), min(src.height, row + 2)
+            c0, c1 = max(0, col - 1), min(src.width, col + 2)
+            red_window = red[r0:r1, c0:c1]
+            nir_window = nir[r0:r1, c0:c1]
             
-            if r_val <= 0 or n_val <= 0 or np.isnan(r_val) or np.isnan(n_val):
+            # Calculate NDVI for each pixel in window
+            mask = (red_window > 0) & (nir_window > 0) & ~np.isnan(red_window) & ~np.isnan(nir_window)
+            if not np.any(mask):
                 return None
             
-            ndvi = (n_val - r_val) / (n_val + r_val)
-            return ndvi if not np.isnan(ndvi) else None
+            ndvi_window = np.zeros_like(red_window, dtype=np.float32)
+            ndvi_window[mask] = (nir_window[mask] - red_window[mask]) / (nir_window[mask] + red_window[mask])
+            
+            # Return mean of valid NDVI values
+            valid_ndvi = ndvi_window[mask]
+            return float(np.mean(valid_ndvi)) if len(valid_ndvi) > 0 else None
     except Exception as e:
         return None
 
@@ -314,16 +323,25 @@ def _get_gcc_from_original(input_file, site_position):
             if row < 0 or row >= src.height or col < 0 or col >= src.width:
                 return None
             
-            b_val = float(blue[row, col])
-            g_val = float(green[row, col])
-            r_val = float(red[row, col])
+            # Extract 3x3 window with boundary handling
+            r0, r1 = max(0, row - 1), min(src.height, row + 2)
+            c0, c1 = max(0, col - 1), min(src.width, col + 2)
+            blue_window = blue[r0:r1, c0:c1]
+            green_window = green[r0:r1, c0:c1]
+            red_window = red[r0:r1, c0:c1]
             
-            total = r_val + g_val + b_val
-            if total <= 0 or np.isnan(total):
+            # Calculate GCC for each pixel in window
+            total = red_window + green_window + blue_window
+            mask = (total > 0) & ~np.isnan(total)
+            if not np.any(mask):
                 return None
             
-            gcc = g_val / total
-            return gcc if not np.isnan(gcc) else None
+            gcc_window = np.zeros_like(green_window, dtype=np.float32)
+            gcc_window[mask] = green_window[mask] / total[mask]
+            
+            # Return mean of valid GCC values
+            valid_gcc = gcc_window[mask]
+            return float(np.mean(valid_gcc)) if len(valid_gcc) > 0 else None
     except Exception as e:
         return None
 

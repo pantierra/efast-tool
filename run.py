@@ -24,7 +24,7 @@ def run_pipeline(season, site_position, site_name):
 
         # print(f"Generating NDVI for raw data: {site_name}, {season}")
         # generate_ndvi_raw(season, site_position, site_name)
-        #create_ndvi_timeseries_raw(season, site_position, site_name)
+        create_ndvi_timeseries_raw(season, site_position, site_name)
 
         # print(f"Detecting clouds for {site_name}, {season}")
         #detect_clouds(season, site_name)
@@ -40,7 +40,7 @@ def run_pipeline(season, site_position, site_name):
         #process_cropped(season, site_position, site_name)
         #print(f"Generating NDVI for final outputs: {site_name}, {season}")
         #generate_ndvi_post_process(season, site_position, site_name)
-        #create_ndvi_timeseries_post_process(season, site_position, site_name)
+        create_ndvi_timeseries_post_process(season, site_position, site_name)
         #print(f"Generating GCC for final outputs: {site_name}, {season}")
         generate_gcc_post_process(season, site_position, site_name)
         create_gcc_timeseries_post_process(season, site_position, site_name)
