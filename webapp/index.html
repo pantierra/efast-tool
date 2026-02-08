@@ -315,14 +315,15 @@
             ctx.clearRect(0, 0, w, h);
             const s2data = greennessTimeseries.s2.filter(t => t.date && t.greenness_index !== null && t.greenness_index !== undefined);
             const fusiondata = greennessTimeseries.fusion.filter(t => t.date && t.greenness_index !== null && t.greenness_index !== undefined);
-            if (!s2data.length && !fusiondata.length) return;
+            const phenocamdata = phenocamGreennessTimeseries.filter(t => t.date && t.greenness_index !== null && t.greenness_index !== undefined);
+            if (!s2data.length && !fusiondata.length && !phenocamdata.length) return;
             
-            const allDates = [...s2data.map(t => new Date(t.date)), ...fusiondata.map(t => new Date(t.date))];
+            const allDates = [...s2data.map(t => new Date(t.date)), ...fusiondata.map(t => new Date(t.date)), ...phenocamdata.map(t => new Date(t.date))];
             const minDate = new Date(Math.min(...allDates));
             const maxDate = new Date(Math.max(...allDates));
             const dateRange = maxDate - minDate || 1;
             
-            const allValues = [...s2data.map(t => t.greenness_index), ...fusiondata.map(t => t.greenness_index)];
+            const allValues = [...s2data.map(t => t.greenness_index), ...fusiondata.map(t => t.greenness_index), ...phenocamdata.map(t => t.greenness_index)];
             const minVal = Math.min(...allValues);
             const maxVal = Math.max(...allValues);
             const valRange = maxVal - minVal || 1;
@@ -366,9 +367,27 @@
                 ctx.stroke();
             }
             
+            if (phenocamdata.length) {
+                ctx.strokeStyle = "#00aa00";
+                ctx.beginPath();
+                let first = true;
+                for (const t of phenocamdata) {
+                    const px = x(t.date), py = y(t.greenness_index);
+                    if (first) { ctx.moveTo(px, py); first = false; }
+                    else ctx.lineTo(px, py);
+                }
+                ctx.stroke();
+            }
+            
             ctx.fillStyle = "#888";
             const axisY = pad + plotH;
-            for (const t of [...s2data, ...fusiondata]) ctx.fillRect(x(t.date) - 1, axisY - 1, 2, 2);
+            for (const t of [...s2data, ...fusiondata, ...phenocamdata]) ctx.fillRect(x(t.date) - 1, axisY - 1, 2, 2);
+            
+            const legendX = pad + plotW - 80, legendY = pad + 5;
+            ctx.font = "9px sans-serif";
+            if (s2data.length) { ctx.strokeStyle = "#ff6600"; ctx.beginPath(); ctx.moveTo(legendX, legendY); ctx.lineTo(legendX + 15, legendY); ctx.stroke(); ctx.fillStyle = "#000"; ctx.fillText("S2", legendX + 18, legendY + 3); }
+            if (fusiondata.length) { ctx.strokeStyle = "#9900cc"; ctx.beginPath(); ctx.moveTo(legendX, legendY + 12); ctx.lineTo(legendX + 15, legendY + 12); ctx.stroke(); ctx.fillStyle = "#000"; ctx.fillText("Fusion", legendX + 18, legendY + 15); }
+            if (phenocamdata.length) { ctx.strokeStyle = "#00aa00"; ctx.beginPath(); ctx.moveTo(legendX, legendY + 24); ctx.lineTo(legendX + 15, legendY + 24); ctx.stroke(); ctx.fillStyle = "#000"; ctx.fillText("PhenoCam", legendX + 18, legendY + 27); }
             
             const currentDate = dateFromDays(parseInt(slider.value));
             const xPos = x(currentDate);
