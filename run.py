@@ -1,6 +1,6 @@
 from call_efast import run_efast, prepare_s2, prepare_s3
 from post_process import process_cropped
-from ndvi import (
+from generate_indexes import (
     generate_ndvi_raw,
     create_ndvi_timeseries_raw,
     generate_ndvi_post_process,
