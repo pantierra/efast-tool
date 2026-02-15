@@ -109,6 +109,10 @@
             <div class="combined-plot-label">GCC Comparison: All Scenarios</div>
             <canvas id="scenariosgcctimeseries" class="combined-plot-canvas"></canvas>
         </div>
+        <div class="combined-plot">
+            <div class="combined-plot-label">Metrics Comparison: All Scenarios</div>
+            <div id="metricsTable" style="overflow-x: auto; margin-top: 10px;"></div>
+        </div>
     </div>
     <script>
         proj4.defs("EPSG:32632", "+proj=utm +zone=32 +datum=WGS84 +units=m +no_defs");
@@ -133,6 +137,7 @@
         }
         
         let allScenariosGCC = {};
+        let metricsData = null;
         const siteMap = L.map("sitemap", { zoomControl: false }).setView(sitePosition, 4).addLayer(L.tileLayer(osmUrl, { attribution: "OpenStreetMap", opacity: 1 }));
         L.marker(sitePosition, { icon: L.divIcon({ className: "site-marker", html: "<div style='width:8px;height:8px;background:red;border:2px solid white;border-radius:50%;box-shadow:0 0 2px rgba(0,0,0,0.5);'></div>", iconSize: [8, 8] }) }).addTo(siteMap);
         const maps = {
@@ -195,11 +200,18 @@
             const scenarioData = await Promise.all(scenarioPromises);
             scenarios.forEach((s, i) => { allScenariosGCC[s.name] = scenarioData[i]; });
             
+            // Load metrics
+            try {
+                const metricsRes = await fetch(`../data/${siteName}/${season}/metrics.json`);
+                if (metricsRes.ok) metricsData = await metricsRes.json();
+            } catch {}
+            
             drawTimeseries();
             drawGreennessTimeseries();
             drawPhenocamGreennessTimeseries();
             drawCombinedGreennessTimeseries();
             drawScenariosComparison();
+            drawMetricsTable();
         }
         
         function drawGreennessTimeseries() {
@@ -512,6 +524,62 @@
             });
         }
         
+        function drawMetricsTable() {
+            const container = document.getElementById("metricsTable");
+            if (!metricsData || !metricsData.temporal) {
+                container.innerHTML = "<p style='color:#666; font-size:12px;'>Metrics not available. Run calculate_metrics.py to generate.</p>";
+                return;
+            }
+            
+            const scenarios = ["aggressive_sigma20", "aggressive_sigma30", "nonaggressive_sigma20", "nonaggressive_sigma30"];
+            const scenarioNames = ["Aggressive σ20", "Aggressive σ30", "Non-aggressive σ20", "Non-aggressive σ30"];
+            const metrics = ["pearson_r", "r_squared", "rmse", "mae", "nrmse", "nse"];
+            const metricLabels = { pearson_r: "r", r_squared: "R²", rmse: "RMSE", mae: "MAE", nrmse: "nRMSE", nse: "NSE" };
+            
+            let html = "<table style='width:100%; border-collapse:collapse; font-size:11px;'>";
+            html += "<thead><tr style='background:#f5f5f5; border-bottom:2px solid #ccc;'>";
+            html += "<th style='padding:8px; text-align:left;'>Scenario</th>";
+            metrics.forEach(m => html += `<th style='padding:8px; text-align:right;'>${metricLabels[m]}</th>`);
+            html += "</tr></thead><tbody>";
+            
+            // Add S2 baseline row
+            if (metricsData.baseline && metricsData.baseline.s2) {
+                const data = metricsData.baseline.s2;
+                html += `<tr style='border-bottom:2px solid #ccc; background:#f9f9f9;'>`;
+                html += `<td style='padding:6px 8px; font-weight:600;'>S2 (baseline)</td>`;
+                metrics.forEach(m => {
+                    const val = data[m];
+                    const fmt = val !== null && val !== undefined ? (m === "pearson_r" || m === "r_squared" || m === "nse" ? val.toFixed(3) : val.toFixed(4)) : "—";
+                    html += `<td style='padding:6px 8px; text-align:right; font-family:monospace;'>${fmt}</td>`;
+                });
+                html += "</tr>";
+            }
+            
+            // Add fusion scenario rows
+            scenarios.forEach((scenario, i) => {
+                const data = metricsData.temporal[scenario];
+                if (!data) return;
+                html += `<tr style='border-bottom:1px solid #eee;'>`;
+                html += `<td style='padding:6px 8px; font-weight:500;'>${scenarioNames[i]}</td>`;
+                metrics.forEach(m => {
+                    const val = data[m];
+                    const fmt = val !== null && val !== undefined ? (m === "pearson_r" || m === "r_squared" || m === "nse" ? val.toFixed(3) : val.toFixed(4)) : "—";
+                    html += `<td style='padding:6px 8px; text-align:right; font-family:monospace;'>${fmt}</td>`;
+                });
+                html += "</tr>";
+            });
+            
+            html += "</tbody></table>";
+            
+            // Add phenocam stats info if available
+            if (metricsData.phenocam_stats) {
+                const stats = metricsData.phenocam_stats;
+                html += `<p style='margin-top:10px; font-size:10px; color:#666;'>PhenoCam stats: mean=${stats.mean.toFixed(3)}, std=${stats.std.toFixed(3)}, n=${stats.n_samples}</p>`;
+            }
+            
+            container.innerHTML = html;
+        }
+        
         function drawTimeseries() {
             const currentDate = dateFromDays(parseInt(slider.value));
             for (const source of ["s2", "fusion", "s3"]) {
@@ -730,6 +798,7 @@
             drawPhenocamGreennessTimeseries();
             drawCombinedGreennessTimeseries();
             drawScenariosComparison();
+            drawMetricsTable();
             for (const source of ["s2", "fusion", "s3"]) {
                 const filename = await findFile(date, source);
                 if (filename) {
