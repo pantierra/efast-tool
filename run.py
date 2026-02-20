@@ -16,27 +16,28 @@ from calculate_metrics import calculate_all_metrics
 
 
 def run_pipeline(season, site_position, site_name):
+    """Run pipeline from existing raw data (no downloads)."""
     try:
-        # print(f"Downloading data for {site_name}, {season}")
-        # download_s2(season, site_position, site_name)
+        # Download steps (skipped - use existing data in data/{site_name}/{season}/raw/)
+        download_s2(season, site_position, site_name)
         # download_s3(season, site_position, site_name)
         # download_phenocam(season, site_position, site_name)
         # download_phenocam_greenness(season, site_position, site_name)
 
-        # print(f"Generating NDVI for raw data: {site_name}, {season}")
-        # create_ndvi_timeseries_raw(season, site_position, site_name)
+        print(f"Generating NDVI for raw data: {site_name}, {season}")
+        #create_ndvi_timeseries_raw(season, site_position, site_name)
 
-        # print(f"Running EFAST fusion for all scenarios: {site_name}, {season}")
-        # run_all_efast_scenarios(season, site_position, site_name)
+        print(f"Running EFAST fusion for all scenarios: {site_name}, {season}")
+        run_all_efast_scenarios(season, site_position, site_name)
 
-        # print(f"Post-processing data: {site_name}, {season}")
-        # process_all_scenarios(season, site_position, site_name)
-        
-        # print(f"Generating NDVI for final outputs: {site_name}, {season}")
-        # create_ndvi_timeseries_post_process(season, site_position, site_name)
-        
-        # print(f"Generating GCC for final outputs: {site_name}, {season}")
-        # create_gcc_timeseries_post_process(season, site_position, site_name)
+        print(f"Post-processing data: {site_name}, {season}")
+        process_all_scenarios(season, site_position, site_name)
+
+        print(f"Generating NDVI for final outputs: {site_name}, {season}")
+        create_ndvi_timeseries_post_process(season, site_position, site_name)
+
+        print(f"Generating GCC for final outputs: {site_name}, {season}")
+        create_gcc_timeseries_post_process(season, site_position, site_name)
 
         print(f"Calculating metrics: {site_name}, {season}")
         calculate_all_metrics(season, site_name, site_position)

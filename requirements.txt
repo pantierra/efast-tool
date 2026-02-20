@@ -6,5 +6,6 @@ netCDF4
 numpy
 requests
 scipy
+matplotlib
 ruff
 pre-commit
