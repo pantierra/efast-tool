@@ -100,8 +100,12 @@ def prepare_s2(season, site_position, site_name, cleaning_strategy="aggressive",
 
         temp_normalized = s2_output_dir / f"temp_{s2_file.name}"
         with rasterio.open(s2_file) as src:
-            # S2 L2A: use DN/10000 (Earth Search AWS differs from ESA spec; offset caused many transparent pixels)
-            data = src.read().astype("float32") / 10000.0
+            pb = src.tags().get("PROCESSING_BASELINE", "")
+            data = src.read().astype("float32")
+            mask_nodata = data == 0
+            data = (data - 1000) / 10000.0 if pb >= "04.00" else data / 10000.0
+            data = np.maximum(data, 0)
+            data[mask_nodata] = 0
             profile = src.profile.copy()
             profile.update({"dtype": "float32", "nodata": 0})
             with rasterio.open(temp_normalized, "w", **profile) as dst:

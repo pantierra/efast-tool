@@ -16,16 +16,16 @@ from calculate_metrics import calculate_all_metrics
 
 
 def run_pipeline(season, site_position, site_name):
-    """Run pipeline from existing raw data (no downloads)."""
+    """Run pipeline (downloads + EFAST fusion + post-process + metrics)."""
     try:
-        # Download steps (skipped - use existing data in data/{site_name}/{season}/raw/)
-        #download_s2(season, site_position, site_name)
-        # download_s3(season, site_position, site_name)
-        # download_phenocam(season, site_position, site_name)
-        # download_phenocam_greenness(season, site_position, site_name)
+        # Download steps (needed for new site/season)
+        download_s2(season, site_position, site_name)
+        download_s3(season, site_position, site_name)
+        download_phenocam(season, site_position, site_name)
+        download_phenocam_greenness(season, site_position, site_name)
 
-        #print(f"Generating NDVI for raw data: {site_name}, {season}")
-        #create_ndvi_timeseries_raw(season, site_position, site_name)
+        print(f"Generating NDVI for raw data: {site_name}, {season}")
+        create_ndvi_timeseries_raw(season, site_position, site_name)
 
         print(f"Running EFAST fusion for all scenarios: {site_name}, {season}")
         run_all_efast_scenarios(season, site_position, site_name)
@@ -48,4 +48,6 @@ def run_pipeline(season, site_position, site_name):
 
 
 if __name__ == "__main__":
-    run_pipeline(2024, (47.116171, 11.320308), "innsbruck")
+    # forthgr - FORTH Heraklion Greece, Agriculture, 2024
+    # sites.geojson: lon=25.0743, lat=35.3045
+    run_pipeline(2024, (35.3045, 25.0743), "forthgr")
