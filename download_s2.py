@@ -136,8 +136,14 @@ def download_s2(season, site_position, site_name, date_range=None):
                 for i, data in enumerate(stacked, 1):
                     dst.write(data, i)
                     dst.set_band_description(i, band_names[i - 1])
+                tags = {}
                 if viewing_angle is not None:
-                    dst.update_tags(VIEWING_ZENITH_ANGLE=viewing_angle)
+                    tags["VIEWING_ZENITH_ANGLE"] = str(viewing_angle)
+                pb = item.properties.get("s2:processing_baseline")
+                if pb is not None:
+                    tags["PROCESSING_BASELINE"] = str(pb)
+                if tags:
+                    dst.update_tags(**tags)
 
             angle_msg = (
                 f" (viewing angle: {viewing_angle:.2f}°)" if viewing_angle else ""
