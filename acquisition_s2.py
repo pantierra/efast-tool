@@ -9,7 +9,7 @@ from rasterio.warp import Resampling, calculate_default_transform, reproject, tr
 from rasterio.windows import from_bounds, transform as window_transform
 from pystac_client import Client
 
-BBOX_SIZE = 0.016
+BBOX_SIZE = 0.011
 TARGET_CRS = CRS.from_epsg(32632)
 
 

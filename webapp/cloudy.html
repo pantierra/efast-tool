@@ -84,13 +84,15 @@
         const showCloudsCheckbox = document.getElementById("showClouds");
         
         async function loadTimeseries() {
-            const [s2, s3, cloudData] = await Promise.all([
-                fetch("../data/innsbruck/2024/raw/ndvi/s2/timeseries.json").then(r => r.json()),
-                fetch("../data/innsbruck/2024/raw/ndvi/s3/timeseries.json").then(r => r.json()),
-                fetch("../data/innsbruck/2024/clouds.json").then(r => r.json()).catch(() => ({ s2: [], s3: [] }))
+            const [s2, s3] = await Promise.all([
+                fetch("../data/innsbruck/2024/raw/preselection/s2_preselection.json").then(r => r.json()),
+                fetch("../data/innsbruck/2024/raw/preselection/s3_preselection.json").then(r => r.json())
             ]);
             timeseries = { s2, s3 };
-            clouds = { s2: new Set(cloudData.s2 || []), s3: new Set(cloudData.s3 || []) };
+            clouds = {
+                s2: new Set((s2 || []).filter(e => e.excluded_aggressive).map(e => e.filename)),
+                s3: new Set((s3 || []).filter(e => e.excluded_aggressive).map(e => e.filename))
+            };
             drawTimeseries();
         }
         
@@ -244,7 +246,7 @@
         }
         
         async function loadNDVI(source, filename) {
-            const tiff = await GeoTIFF.fromArrayBuffer(await (await fetch(`../data/innsbruck/2024/raw/ndvi/${source}/${filename}`)).arrayBuffer());
+            const tiff = await GeoTIFF.fromArrayBuffer(await (await fetch(`../data/innsbruck/2024/raw/${source}/${filename}`)).arrayBuffer());
             const image = await tiff.getImage();
             const data = Array.from((await image.readRasters())[0]);
             const width = image.getWidth();
@@ -303,7 +305,7 @@
                         const filename = `${date}_${i}.geotiff`;
                         if (!showCloudsCheckbox.checked && clouds[source] && clouds[source].has(filename)) continue;
                         try {
-                            const res = await fetch(`../data/innsbruck/2024/raw/ndvi/${source}/${filename}`);
+                            const res = await fetch(`../data/innsbruck/2024/raw/${source}/${filename}`);
                             if (res.ok) return filename;
                         } catch {}
                     }

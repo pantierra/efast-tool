@@ -6,6 +6,8 @@ from rasterio.warp import transform as transform_coords
 from pathlib import Path
 from datetime import datetime
 
+from preselection import _sample_3x3
+
 RED_BAND = 3
 NIR_BAND = 4
 BLUE_BAND = 1
@@ -65,50 +67,6 @@ def _get_ndvi_value(ndvi_file, site_position):
     return None
 
 
-def _get_ndvi_from_original(input_file, site_position):
-    """Calculate NDVI directly from original file without creating GeoTIFF."""
-    try:
-        with rasterio.open(input_file) as src:
-            if src.count < 4:
-                return None
-
-            red = src.read(RED_BAND).astype(np.float32)
-            nir = src.read(NIR_BAND).astype(np.float32)
-
-            lon, lat = site_position[1], site_position[0]
-            x, y = transform_coords("EPSG:4326", src.crs, [lon], [lat])
-
-            if not (
-                src.bounds.left <= x[0] <= src.bounds.right
-                and src.bounds.bottom <= y[0] <= src.bounds.top
-            ):
-                return None
-
-            row, col = src.index(x[0], y[0])
-            if row < 0 or row >= src.height or col < 0 or col >= src.width:
-                return None
-
-            # Extract 3x3 window with boundary handling
-            r0, r1 = max(0, row - 1), min(src.height, row + 2)
-            c0, c1 = max(0, col - 1), min(src.width, col + 2)
-            red_window = red[r0:r1, c0:c1]
-            nir_window = nir[r0:r1, c0:c1]
-
-            # Calculate NDVI for each pixel in window
-            mask = (red_window > 0) & (nir_window > 0) & ~np.isnan(red_window) & ~np.isnan(nir_window)
-            if not np.any(mask):
-                return None
-
-            ndvi_window = np.zeros_like(red_window, dtype=np.float32)
-            ndvi_window[mask] = (nir_window[mask] - red_window[mask]) / (nir_window[mask] + red_window[mask])
-
-            # Return mean of valid NDVI values
-            valid_ndvi = ndvi_window[mask]
-            return float(np.mean(valid_ndvi)) if len(valid_ndvi) > 0 else None
-    except Exception as e:
-        return None
-
-
 def _create_timeseries_for_dir(input_dir, output_dir, site_position, source_name, pattern="*.geotiff"):
     print(f"[NDVI-{source_name}] Creating timeseries.json...")
     timeseries = []
@@ -138,13 +96,17 @@ def _create_timeseries_for_dir(input_dir, output_dir, site_position, source_name
                 f"[NDVI-{source_name}] Warning: Could not extract date from {filename}, using '{date_str}'"
             )
 
-        ndvi_value = _get_ndvi_from_original(input_file, site_position)
+        ndvi_value, band_means = _sample_3x3(input_file, site_position)
+        blue_mean = band_means.get("b02") if band_means else None
         if ndvi_value is None:
             print(
                 f"[NDVI-{source_name}] Warning: Could not sample {filename} (outside bounds or nodata)"
             )
 
-        timeseries.append({"date": date, "filename": filename, "ndvi": ndvi_value})
+        entry = {"date": date, "filename": filename, "ndvi": ndvi_value}
+        if blue_mean is not None:
+            entry["blue"] = blue_mean
+        timeseries.append(entry)
 
     timeseries.sort(key=lambda x: x["date"])
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -196,13 +158,6 @@ def _process_ndvi_files(
 def generate_ndvi_raw(season, site_position, site_name):
     # No longer creating NDVI GeoTIFF files, only timeseries
     pass
-
-
-def create_ndvi_timeseries_raw(season, site_position, site_name):
-    for source in ["s2", "s3"]:
-        input_dir = Path(f"data/{site_name}/{season}/raw/{source}/")
-        output_dir = Path(f"data/{site_name}/{season}/raw/ndvi/{source}/")
-        _create_timeseries_for_dir(input_dir, output_dir, site_position, source.upper())
 
 
 def _get_output_name_prepared(geotiff_file):

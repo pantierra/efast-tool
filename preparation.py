@@ -23,12 +23,16 @@ def _import_distance_to_clouds():
         )
 
 
-def _load_clouds(clouds_file):
+def _load_excluded(season, site_name, cleaning_strategy):
+    """Load excluded filenames from NDVI timeseries (excluded_aggressive / excluded_nonaggressive)."""
+    base = Path(f"data/{site_name}/{season}/raw/preselection")
+    key = f"excluded_{cleaning_strategy}"
     clouds = {"s2": set(), "s3": set()}
-    if clouds_file.exists():
-        clouds_data = json.loads(clouds_file.read_text())
-        clouds["s2"] = set(clouds_data.get("s2", []))
-        clouds["s3"] = set(clouds_data.get("s3", []))
+    for source in ["s2", "s3"]:
+        ts_file = base / f"{source}_preselection.json"
+        if ts_file.exists():
+            data = json.loads(ts_file.read_text())
+            clouds[source] = {e["filename"] for e in data if e.get(key)}
     return clouds
 
 
@@ -71,9 +75,8 @@ def prepare_s2(season, site_position, site_name, cleaning_strategy="aggressive",
     s2_dir = Path(f"data/{site_name}/{season}/raw/s2/")
     s3_dir = Path(f"data/{site_name}/{season}/raw/s3/")
     s2_output_dir = _get_base_dir(season, site_name, cleaning_strategy) / "s2"
-    clouds_file = Path(f"data/{site_name}/{season}/clouds_{cleaning_strategy}.json")
 
-    clouds = _load_clouds(clouds_file)
+    clouds = _load_excluded(season, site_name, cleaning_strategy)
     s2_output_dir.mkdir(parents=True, exist_ok=True)
 
     s3_files = [f for f in s3_dir.glob("*.geotiff") if f.name not in clouds["s3"]]
@@ -116,9 +119,8 @@ def prepare_s3(season, site_position, site_name, cleaning_strategy="aggressive",
     base_dir = _get_base_dir(season, site_name, cleaning_strategy)
     s2_prepared_dir = base_dir / "s2"
     s3_preprocessed_dir = base_dir / "s3"
-    clouds_file = Path(f"data/{site_name}/{season}/clouds_{cleaning_strategy}.json")
 
-    clouds = _load_clouds(clouds_file)
+    clouds = _load_excluded(season, site_name, cleaning_strategy)
     s3_preprocessed_dir.mkdir(parents=True, exist_ok=True)
 
     s3_by_date = defaultdict(list)

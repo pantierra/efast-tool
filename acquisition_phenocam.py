@@ -44,6 +44,12 @@ def _find_start_offset(site_name, start_dt, total_count):
 
 
 def download_phenocam(season, site_position, site_name, date_range=None):
+    """Wrapper that downloads both phenocam images and GCC time series."""
+    _download_phenocam_images(season, site_position, site_name, date_range)
+    _download_phenocam_gcc(season, site_position, site_name, date_range)
+
+
+def _download_phenocam_images(season, site_position, site_name, date_range=None):
     lat, lon = site_position
     datetime_range = date_range or f"{season}-01-01/{season}-12-31"
     output_dir = Path(f"data/{site_name}/{season}/raw/phenocam/")
@@ -149,10 +155,10 @@ def download_phenocam(season, site_position, site_name, date_range=None):
     print("[PhenoCam] Completed")
 
 
-def download_phenocam_greenness(season, site_position, site_name, date_range=None):
-    """Fetch greenness-index time series from PhenoCam API."""
+def _download_phenocam_gcc(season, site_position, site_name, date_range=None):
+    """Fetch greenness-index time series from PhenoCam API. Saves JSON and CSV."""
     datetime_range = date_range or f"{season}-01-01/{season}-12-31"
-    output_file = Path(f"data/{site_name}/{season}/raw/phenocam/timeseries.json")
+    output_file = Path(f"data/{site_name}/{season}/raw/phenocam/phenocam_gcc.json")
     output_file.parent.mkdir(parents=True, exist_ok=True)
 
     start_date, end_date = datetime_range.split("/")
@@ -210,7 +216,17 @@ def download_phenocam_greenness(season, site_position, site_name, date_range=Non
         return
 
     timeseries.sort(key=lambda x: x["date"])
-    with open(output_file, "w") as f:
+
+    output_dir = output_file.parent
+    json_path = output_dir / "phenocam_gcc.json"
+    csv_path = output_dir / "phenocam_gcc.csv"
+
+    with open(json_path, "w") as f:
         json.dump(timeseries, f, indent=2)
 
-    print(f"[PhenoCam-GI] Saved: {output_file} ({len(timeseries)} entries)")
+    with open(csv_path, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=["date", "greenness_index"])
+        writer.writeheader()
+        writer.writerows(timeseries)
+
+    print(f"[PhenoCam-GI] Saved: {json_path} and {csv_path} ({len(timeseries)} entries)")
