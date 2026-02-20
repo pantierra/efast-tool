@@ -1,4 +1,4 @@
-"""Calculate metrics comparing fusion-derived GCC with phenocam GCC ground truth."""
+"""Metrics and statistics: temporal/spatial metrics and PhenoCam stats."""
 import json
 import numpy as np
 from pathlib import Path
@@ -7,7 +7,7 @@ from scipy.stats import pearsonr
 import rasterio
 from rasterio.warp import transform as transform_coords
 
-from generate_indexes import BLUE_BAND, GREEN_BAND, RED_BAND
+from metrics_indices import BLUE_BAND, GREEN_BAND, RED_BAND
 
 
 def load_timeseries(filepath):
@@ -25,7 +25,7 @@ def match_dates(fusion_ts, phenocam_ts):
     fusion_vals = []
     phenocam_vals = []
     dates = []
-    
+
     for date in sorted(common_dates):
         fusion_val = fusion_ts[date]
         phenocam_val = phenocam_ts[date]
@@ -33,7 +33,7 @@ def match_dates(fusion_ts, phenocam_ts):
             fusion_vals.append(fusion_val)
             phenocam_vals.append(phenocam_val)
             dates.append(date)
-    
+
     return np.array(fusion_vals), np.array(phenocam_vals), dates
 
 
@@ -95,10 +95,10 @@ def nse(y_true, y_pred):
 def calculate_temporal_metrics(fusion_ts, phenocam_ts):
     """Calculate all 6 temporal metrics."""
     fusion_vals, phenocam_vals, dates = match_dates(fusion_ts, phenocam_ts)
-    
+
     if len(fusion_vals) < 2:
         return None
-    
+
     metrics = {
         "pearson_r": pearson_correlation(phenocam_vals, fusion_vals),
         "r_squared": r_squared(phenocam_vals, fusion_vals),
@@ -117,7 +117,7 @@ def calculate_phenocam_stats(phenocam_ts):
     values = [v for v in phenocam_ts.values() if v is not None]
     if len(values) == 0:
         return None
-    
+
     vals = np.array(values)
     return {
         "mean": float(np.mean(vals)),
@@ -134,44 +134,44 @@ def _get_spatial_stats_from_raster(raster_file, site_position):
         with rasterio.open(raster_file) as src:
             if src.count < 3:
                 return None
-            
+
             blue = src.read(BLUE_BAND).astype(np.float32)
             green = src.read(GREEN_BAND).astype(np.float32)
             red = src.read(RED_BAND).astype(np.float32)
-            
+
             lon, lat = site_position[1], site_position[0]
             x, y = transform_coords("EPSG:4326", src.crs, [lon], [lat])
-            
+
             if not (
                 src.bounds.left <= x[0] <= src.bounds.right
                 and src.bounds.bottom <= y[0] <= src.bounds.top
             ):
                 return None
-            
+
             row, col = src.index(x[0], y[0])
             if row < 0 or row >= src.height or col < 0 or col >= src.width:
                 return None
-            
+
             # Extract 3x3 window with boundary handling
             r0, r1 = max(0, row - 1), min(src.height, row + 2)
             c0, c1 = max(0, col - 1), min(src.width, col + 2)
             blue_window = blue[r0:r1, c0:c1]
             green_window = green[r0:r1, c0:c1]
             red_window = red[r0:r1, c0:c1]
-            
+
             # Calculate GCC for each pixel in window
             total = red_window + green_window + blue_window
             mask = (total > 0) & ~np.isnan(total) & (blue_window >= 0) & (green_window >= 0) & (red_window >= 0)
             if not np.any(mask):
                 return None
-            
+
             gcc_window = np.zeros_like(green_window, dtype=np.float32)
             gcc_window[mask] = green_window[mask] / total[mask]
             valid_gcc = gcc_window[mask]
-            
+
             if len(valid_gcc) == 0:
                 return None
-            
+
             return {
                 "mean": float(np.mean(valid_gcc)),
                 "std": float(np.std(valid_gcc)),
@@ -187,15 +187,15 @@ def calculate_spatial_metrics(fusion_raster_dir, phenocam_ts, site_position):
     fusion_raster_dir = Path(fusion_raster_dir)
     if not fusion_raster_dir.exists():
         return None
-    
+
     spatial_means = []
     phenocam_vals = []
-    
+
     # Process each fusion raster file
     for raster_file in sorted(fusion_raster_dir.glob("*.geotiff")):
         if "DIST_CLOUD" in raster_file.name:
             continue
-        
+
         # Extract date from filename
         parts = raster_file.stem.split("_")
         date_str = None
@@ -203,35 +203,35 @@ def calculate_spatial_metrics(fusion_raster_dir, phenocam_ts, site_position):
             if len(part) == 8 and part.isdigit():
                 date_str = part
                 break
-        
+
         if not date_str:
             continue
-        
+
         # Convert to ISO format for matching
         try:
             date = datetime.strptime(date_str, "%Y%m%d").isoformat()
         except ValueError:
             continue
-        
+
         # Get phenocam value for this date
         phenocam_val = phenocam_ts.get(date)
         if phenocam_val is None:
             continue
-        
+
         # Extract spatial statistics
         stats = _get_spatial_stats_from_raster(raster_file, site_position)
         if stats is None:
             continue
-        
+
         spatial_means.append(stats["mean"])
         phenocam_vals.append(phenocam_val)
-    
+
     if len(spatial_means) < 2:
         return None
-    
+
     spatial_means = np.array(spatial_means)
     phenocam_vals = np.array(phenocam_vals)
-    
+
     return {
         "pearson_r": pearson_correlation(phenocam_vals, spatial_means),
         "r_squared": r_squared(phenocam_vals, spatial_means),
@@ -243,24 +243,24 @@ def calculate_scenario_metrics(season, site_name, strategy, sigma, site_position
     """Calculate metrics for one scenario."""
     base = Path(f"data/{site_name}/{season}")
     processed_dir = f"processed_{strategy}_sigma{sigma}"
-    
+
     # Load timeseries
     fusion_ts_path = base / processed_dir / "gcc" / "fusion" / "timeseries.json"
     phenocam_ts_path = base / "raw" / "phenocam" / "timeseries.json"
-    
+
     fusion_ts = load_timeseries(fusion_ts_path)
     phenocam_ts = load_timeseries(phenocam_ts_path)
-    
+
     if not fusion_ts or not phenocam_ts:
         return None, None
-    
+
     # Calculate temporal metrics
     temporal_metrics = calculate_temporal_metrics(fusion_ts, phenocam_ts)
-    
+
     # Calculate spatial metrics
     fusion_raster_dir = base / processed_dir / "fusion"
     spatial_metrics = calculate_spatial_metrics(fusion_raster_dir, phenocam_ts, site_position)
-    
+
     return temporal_metrics, spatial_metrics
 
 
@@ -268,20 +268,20 @@ def calculate_all_metrics(season, site_name, site_position):
     """Calculate metrics for all 4 scenarios and save to JSON."""
     results = {"temporal": {}, "spatial": {}}
     base = Path(f"data/{site_name}/{season}")
-    
+
     # Load phenocam timeseries once (same for all scenarios)
     phenocam_ts_path = base / "raw" / "phenocam" / "timeseries.json"
     phenocam_ts = load_timeseries(phenocam_ts_path)
-    
+
     if not phenocam_ts:
         print("[METRICS] Warning: No phenocam data found")
         return results
-    
+
     # Calculate phenocam stats
     phenocam_stats = calculate_phenocam_stats(phenocam_ts)
     if phenocam_stats:
         results["phenocam_stats"] = phenocam_stats
-    
+
     # Calculate S2 baseline metrics once (S2 data is identical across scenarios)
     s2_ts_path = base / "processed_aggressive_sigma20" / "gcc" / "s2" / "timeseries.json"
     s2_ts = load_timeseries(s2_ts_path)
@@ -289,34 +289,34 @@ def calculate_all_metrics(season, site_name, site_position):
         s2_metrics = calculate_temporal_metrics(s2_ts, phenocam_ts)
         if s2_metrics:
             results["baseline"] = {"s2": s2_metrics}
-    
+
     # Calculate fusion metrics for each scenario
     for strategy in ["aggressive", "nonaggressive"]:
         for sigma in [20, 30]:
             scenario_name = f"{strategy}_sigma{sigma}"
             print(f"[METRICS] Calculating metrics for {scenario_name}...")
-            
+
             processed_dir = f"processed_{strategy}_sigma{sigma}"
-            
+
             # Load fusion timeseries
             fusion_ts_path = base / processed_dir / "gcc" / "fusion" / "timeseries.json"
             fusion_ts = load_timeseries(fusion_ts_path)
-            
+
             if not fusion_ts:
                 print(f"[METRICS] Warning: Missing fusion data for {scenario_name}, skipping")
                 continue
-            
+
             # Calculate temporal metrics
             temporal_metrics = calculate_temporal_metrics(fusion_ts, phenocam_ts)
             if temporal_metrics:
                 results["temporal"][scenario_name] = temporal_metrics
-            
+
             # Calculate spatial metrics
             fusion_raster_dir = base / processed_dir / "fusion"
             spatial_metrics = calculate_spatial_metrics(fusion_raster_dir, phenocam_ts, site_position)
             if spatial_metrics:
                 results["spatial"][scenario_name] = spatial_metrics
-    
+
     # Add summary
     if results["temporal"]:
         best_temporal = max(
@@ -324,7 +324,7 @@ def calculate_all_metrics(season, site_name, site_position):
             key=lambda x: x[1].get("r_squared", -1) if x[1].get("r_squared") is not None else -1
         )
         results["summary"] = {"best_temporal_scenario": best_temporal[0]}
-    
+
     if results["spatial"]:
         best_spatial = max(
             results["spatial"].items(),
@@ -333,38 +333,38 @@ def calculate_all_metrics(season, site_name, site_position):
         if "summary" not in results:
             results["summary"] = {}
         results["summary"]["best_spatial_scenario"] = best_spatial[0]
-    
+
     # Save results
     output_path = Path(f"data/{site_name}/{season}/metrics.json")
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with open(output_path, "w") as f:
         json.dump(results, f, indent=2)
     print(f"[METRICS] Saved results to {output_path}")
-    
+
     return results
 
 
 def main():
     """Standalone script entry point."""
     import sys
-    
+
     if len(sys.argv) < 4:
-        print("Usage: calculate_metrics.py <season> <site_name> <lat> <lon>")
-        print("Example: calculate_metrics.py 2024 innsbruck 47.116171 11.320308")
+        print("Usage: metrics_stats.py <season> <site_name> <lat> <lon>")
+        print("Example: metrics_stats.py 2024 innsbruck 47.116171 11.320308")
         sys.exit(1)
-    
+
     season = int(sys.argv[1])
     site_name = sys.argv[2]
     site_position = (float(sys.argv[3]), float(sys.argv[4]))
-    
+
     results = calculate_all_metrics(season, site_name, site_position)
-    
+
     # Save results
     output_path = Path(f"data/{site_name}/{season}/metrics.json")
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with open(output_path, "w") as f:
         json.dump(results, f, indent=2)
-    
+
     print(f"[METRICS] Saved results to {output_path}")
 
 

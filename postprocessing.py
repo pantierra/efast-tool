@@ -1,3 +1,4 @@
+"""Post-processing: crop fusion/S2/S3 to valid pixels."""
 from pathlib import Path
 import numpy as np
 import rasterio
@@ -12,16 +13,16 @@ def process_cropped(season, site_position, site_name, cleaning_strategy="aggress
     prepared = base / f"prepared_{cleaning_strategy}"
     processed_dir = f"processed_{cleaning_strategy}_sigma{sigma}" if sigma else f"processed_{cleaning_strategy}_sigma20"
     processed = base / processed_dir
-    
+
     s2_prep = prepared / "s2"
     s3_prep = prepared / "s3"
     fusion_prep = prepared / (f"fusion_sigma{sigma}" if sigma else "fusion")
-    
+
     for output_dir in [processed / "s2", processed / "s3", processed / "fusion"]:
         output_dir.mkdir(parents=True, exist_ok=True)
-    
+
     print(f"[PROCESS] Processing files: {site_name}, {season}, {cleaning_strategy}, sigma={sigma or 20}")
-    
+
     # Crop fusion to valid data and get dimensions
     fusion_dims = {}
     for fusion_file in fusion_prep.glob("REFL_*.tif"):
@@ -49,7 +50,7 @@ def process_cropped(season, site_position, site_name, cleaning_strategy="aggress
                 dst.write(data_crop)
             fusion_dims[date_str] = (c0, r0, w, h, transform, src.transform, src.crs, src.profile)
         print(f"[PROCESS] Cropped fusion: {output_file}")
-    
+
     # Crop S2 and S3 to fusion size
     for date_str, (c0, r0, w, h, transform, fusion_transform, crs, fusion_profile) in fusion_dims.items():
         window = windows.Window(c0, r0, w, h)
@@ -91,7 +92,7 @@ def process_cropped(season, site_position, site_name, cleaning_strategy="aggress
                         with rasterio.open(output_file, "w", **p2) as dst:
                             dst.write(data)
             print(f"[PROCESS] Cropped: {output_file}")
-    
+
     print("[PROCESS] Completed")
 
 
@@ -100,3 +101,8 @@ def process_all_scenarios(season, site_position, site_name):
     for strategy in ["aggressive", "nonaggressive"]:
         for sigma in [None, 30]:
             process_cropped(season, site_position, site_name, cleaning_strategy=strategy, sigma=sigma)
+
+
+# Aliases
+postprocess = process_cropped
+postprocess_all_scenarios = process_all_scenarios

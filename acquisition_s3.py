@@ -1,3 +1,4 @@
+"""Sentinel-3-OLCI acquisition from Copernicus Data Space OpenEO API."""
 import os
 import time
 from pathlib import Path

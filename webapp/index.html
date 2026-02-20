@@ -11,6 +11,9 @@
         .slider-container { position: sticky; top: 0; background: white; padding: 20px; z-index: 1000; border-bottom: 1px solid #ccc; }
         .scenario-selector { margin-bottom: 10px; }
         .scenario-selector select { padding: 5px 10px; font-size: 14px; }
+        .site-selector { margin-bottom: 10px; }
+        .site-selector select { padding: 5px 10px; font-size: 14px; }
+        .site-selector label { margin-right: 5px; }
         .container { max-width: 1400px; margin: 0 auto; padding: 20px; }
         .header { display: flex; gap: 20px; margin-bottom: 20px; border-bottom: 1px solid #ccc; padding-top: 10px;padding-bottom: 20px;}
         .header-col { flex: 1; }
@@ -59,6 +62,12 @@
             <div class="header-col">
                 <div id="sitemap" class="sitemap"></div>
             </div>
+        </div>
+        <div class="site-selector">
+            <label for="siteSelect">Site: </label>
+            <select id="siteSelect"></select>
+            <label for="seasonSelect">Season: </label>
+            <select id="seasonSelect"></select>
         </div>
         <div class="scenario-selector">
             <label for="scenarioSelect">Scenario: </label>
@@ -118,15 +127,16 @@
         proj4.defs("EPSG:32632", "+proj=utm +zone=32 +datum=WGS84 +units=m +no_defs");
         proj4.defs("EPSG:4326", "+proj=longlat +datum=WGS84 +no_defs");
         
-        const start = new Date(2024, 0, 1);
+        let start = new Date(2024, 0, 1);
         const slider = document.getElementById("dateSlider");
         const dateDisplay = document.getElementById("dateDisplay");
         const osmUrl = "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png";
         const osmOpts = { attribution: "OpenStreetMap", opacity: 0.4 };
         const mapOpts = { zoomControl: false };
-        const sitePosition = [47.116171, 11.320308];
-        const siteName = "innsbruck";
-        const season = "2024";
+        let sitePosition = [47.116171, 11.320308];
+        let siteName = "innsbruck";
+        let season = "2024";
+        let sitesData = null;
         
         const urlParams = new URLSearchParams(location.search);
         const strategy = urlParams.get("strategy") || "aggressive";
@@ -139,7 +149,7 @@
         let allScenariosGCC = {};
         let metricsData = null;
         const siteMap = L.map("sitemap", { zoomControl: false }).setView(sitePosition, 4).addLayer(L.tileLayer(osmUrl, { attribution: "OpenStreetMap", opacity: 1 }));
-        L.marker(sitePosition, { icon: L.divIcon({ className: "site-marker", html: "<div style='width:8px;height:8px;background:red;border:2px solid white;border-radius:50%;box-shadow:0 0 2px rgba(0,0,0,0.5);'></div>", iconSize: [8, 8] }) }).addTo(siteMap);
+        const siteMarker = L.marker(sitePosition, { icon: L.divIcon({ className: "site-marker", html: "<div style='width:8px;height:8px;background:red;border:2px solid white;border-radius:50%;box-shadow:0 0 2px rgba(0,0,0,0.5);'></div>", iconSize: [8, 8] }) }).addTo(siteMap);
         const maps = {
             s2: L.map("s2map", mapOpts).setView(sitePosition, 12).addLayer(L.tileLayer(osmUrl, osmOpts)),
             fusion: L.map("fusionmap", mapOpts).setView(sitePosition, 12).addLayer(L.tileLayer(osmUrl, osmOpts)),
@@ -173,6 +183,7 @@
         });
         
         async function loadTimeseries() {
+            metricsData = null;
             const fusionPath = getFusionPath();
             const [s2, fusion, s3, s2gcc, fusiongcc, s3gcc, phenocam] = await Promise.all([
                 fetch(`../data/${siteName}/${season}/processed_${strategy}_sigma${sigma}/ndvi/s2/timeseries.json`).then(r => r.json()).catch(() => []),
@@ -526,8 +537,13 @@
         
         function drawMetricsTable() {
             const container = document.getElementById("metricsTable");
+            const hasAnyData = timeseries.s2.length || timeseries.fusion.length || timeseries.s3.length || phenocamGreennessTimeseries.length;
+            if (!hasAnyData) {
+                container.innerHTML = "<p style='color:#666; font-size:12px;'>No data for this site/season.</p>";
+                return;
+            }
             if (!metricsData || !metricsData.temporal) {
-                container.innerHTML = "<p style='color:#666; font-size:12px;'>Metrics not available. Run calculate_metrics.py to generate.</p>";
+                container.innerHTML = "<p style='color:#666; font-size:12px;'>Metrics not available. Run the pipeline (run.py) or metrics_stats.py to generate.</p>";
                 return;
             }
             
@@ -789,6 +805,8 @@
             const date = dateFromDays(parseInt(slider.value));
             dateDisplay.textContent = date;
             const params = new URLSearchParams();
+            params.set("site", siteName);
+            params.set("season", season);
             params.set("date", date);
             params.set("strategy", strategy);
             if (sigma !== "20") params.set("sigma", sigma);
@@ -822,10 +840,131 @@
             window.location.search = params.toString();
         });
         
-        const urlDate = urlParams.get("date");
-        if (urlDate) slider.value = daysFromDate(urlDate);
+        const siteSelect = document.getElementById("siteSelect");
+        const seasonSelect = document.getElementById("seasonSelect");
+        
+        function getSiteBySitename(sitename) {
+            return sitesData?.features?.find(f => f.properties?.sitename === sitename);
+        }
+        
+        let availableSiteSeasons = {};  // { sitename: [season, ...] }
+
+        function populateSeasonOptions(sitename) {
+            seasonSelect.innerHTML = "";
+            const seasons = availableSiteSeasons[sitename] || [];
+            for (const s of seasons) {
+                const opt = document.createElement("option");
+                opt.value = s;
+                opt.textContent = s;
+                seasonSelect.appendChild(opt);
+            }
+        }
+
+        async function probeDataExists(sitename, season) {
+            try {
+                const res = await fetch(`../data/${sitename}/${season}/metrics.json`, { method: "HEAD" });
+                return res.ok;
+            } catch { return false; }
+        }
+        
+        async function setSiteSeason(newSiteName, newSeason) {
+            const site = getSiteBySitename(newSiteName);
+            let pos;
+            let description;
+            if (site) {
+                const [lon, lat] = site.geometry.coordinates;
+                pos = [lat, lon];
+                description = site.properties.description || newSiteName;
+            } else {
+                pos = [47.116171, 11.320308];
+                description = newSiteName;
+            }
+            siteName = newSiteName;
+            season = newSeason;
+            sitePosition = pos;
+            start = new Date(parseInt(season), 0, 1);
+            const yearEnd = new Date(parseInt(season), 11, 31);
+            slider.max = Math.ceil((yearEnd - start) / 86400000);
+            document.getElementById("siteName").textContent = description;
+            document.getElementById("season").textContent = season;
+            siteMap.setView(sitePosition, 4);
+            siteMarker.setLatLng(sitePosition);
+            for (const source of ["s2", "fusion", "s3"]) {
+                maps[source].setView(sitePosition, 12);
+                markers[source].setLatLng(sitePosition);
+            }
+            const params = new URLSearchParams(location.search);
+            params.set("site", siteName);
+            params.set("season", season);
+            history.replaceState({}, "", `?${params}`);
+            await loadTimeseries();
+            const urlDate = params.get("date");
+            if (urlDate) slider.value = daysFromDate(urlDate);
+            await updateImages();
+        }
+        
+        async function init() {
+            try {
+                const res = await fetch("../data/sites.geojson");
+                if (!res.ok) throw new Error("Could not load sites");
+                sitesData = await res.json();
+            } catch (e) {
+                console.error("Failed to load sites.geojson:", e);
+                sitesData = { features: [] };
+            }
+            const features = sitesData.features || [];
+            availableSiteSeasons = {};
+            for (const f of features) {
+                const sn = f.properties?.sitename;
+                if (!sn) continue;
+                const seasonsFromGeo = f.properties?.seasons ? Object.keys(f.properties.seasons).sort() : [];
+                const withData = [];
+                for (const s of seasonsFromGeo) {
+                    if (await probeDataExists(sn, s)) withData.push(s);
+                }
+                if (withData.length) availableSiteSeasons[sn] = withData;
+            }
+            const availableSites = Object.keys(availableSiteSeasons);
+            siteSelect.innerHTML = "";
+            if (availableSites.length === 0) {
+                const opt = document.createElement("option");
+                opt.value = "innsbruck";
+                opt.textContent = "innsbruck";
+                siteSelect.appendChild(opt);
+                availableSiteSeasons.innsbruck = ["2024"];
+            } else {
+                for (const sn of availableSites.sort()) {
+                    const opt = document.createElement("option");
+                    opt.value = sn;
+                    opt.textContent = sn;
+                    siteSelect.appendChild(opt);
+                }
+            }
+            const urlSite = urlParams.get("site");
+            const urlSeason = urlParams.get("season");
+            const initialSite = urlSite && availableSites.includes(urlSite) ? urlSite : availableSites[0] || "innsbruck";
+            siteName = initialSite;
+            siteSelect.value = initialSite;
+            populateSeasonOptions(initialSite);
+            const seasons = availableSiteSeasons[initialSite] || [];
+            const initialSeason = urlSeason && seasons.includes(urlSeason) ? urlSeason : (seasons[0] || "2024");
+            season = initialSeason;
+            seasonSelect.value = initialSeason;
+            siteSelect.addEventListener("change", function() {
+                const sn = this.value;
+                populateSeasonOptions(sn);
+                const seas = availableSiteSeasons[sn] || [];
+                seasonSelect.value = seas[0] || season;
+                setSiteSeason(sn, seasonSelect.value);
+            });
+            seasonSelect.addEventListener("change", function() {
+                setSiteSeason(siteSelect.value, this.value);
+            });
+            await setSiteSeason(initialSite, initialSeason);
+        }
+        
         slider.addEventListener("input", updateImages);
-        loadTimeseries().then(updateImages);
+        init();
     </script>
 </body>
 </html>

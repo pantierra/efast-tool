@@ -1,12 +1,16 @@
+"""Sentinel-2-MSI acquisition from AWS Element84 Earth Search (STAC catalog)."""
+import numpy as np
 import rasterio
 import xml.etree.ElementTree as ET
 import requests
 from pathlib import Path
-from rasterio.warp import transform_geom
+from rasterio.crs import CRS
+from rasterio.warp import Resampling, calculate_default_transform, reproject, transform_geom
 from rasterio.windows import from_bounds, transform as window_transform
 from pystac_client import Client
 
-BBOX_SIZE = 0.011
+BBOX_SIZE = 0.016
+TARGET_CRS = CRS.from_epsg(32632)
 
 
 def _get_bbox(lon, lat):
@@ -128,9 +132,40 @@ def download_s2(season, site_position, site_name, date_range=None):
                 band_data[band_idx] = data[0]
 
         if profile and len(band_data) == len(bands):
-            stacked = [band_data[i] for i in sorted(band_data.keys())]
+            stacked = np.array([band_data[i] for i in sorted(band_data.keys())])
             band_names = [list(bands.keys())[i] for i in sorted(band_data.keys())]
             viewing_angle = _extract_viewing_angle(item)
+
+            if profile["crs"] != TARGET_CRS:
+                src_transform = profile["transform"]
+                src_height, src_width = profile["height"], profile["width"]
+                left, bottom, right, top = rasterio.transform.array_bounds(
+                    src_height, src_width, src_transform
+                )
+                dst_transform, dst_width, dst_height = calculate_default_transform(
+                    profile["crs"], TARGET_CRS, src_width, src_height,
+                    left=left, bottom=bottom, right=right, top=top,
+                )
+                reprojected = np.empty(
+                    (len(stacked), dst_height, dst_width), dtype=stacked.dtype
+                )
+                for i in range(len(stacked)):
+                    reproject(
+                        source=stacked[i],
+                        destination=reprojected[i],
+                        src_transform=src_transform,
+                        src_crs=profile["crs"],
+                        dst_transform=dst_transform,
+                        dst_crs=TARGET_CRS,
+                        resampling=Resampling.bilinear,
+                    )
+                stacked = reprojected
+                profile.update({
+                    "crs": TARGET_CRS,
+                    "transform": dst_transform,
+                    "width": dst_width,
+                    "height": dst_height,
+                })
 
             with rasterio.open(filepath, "w", **profile) as dst:
                 for i, data in enumerate(stacked, 1):

@@ -1,3 +1,4 @@
+"""Pre-selection: NDVI-based cloud/flaw filtering for S2 and S3 data."""
 import json
 from pathlib import Path
 from datetime import datetime
@@ -8,6 +9,7 @@ THRESHOLDS = {"aggressive": {"threshold": 0.3, "delta": 0.15}, "nonaggressive": 
 
 
 def detect_clouds(season, site_name, cleaning_strategy="aggressive"):
+    """Filter cloud-covered/flawed S2 and S3 files using NDVI thresholds."""
     output_file = Path(f"data/{site_name}/{season}/clouds_{cleaning_strategy}.json")
     clouds = {"s2": [], "s3": []}
     thresholds = THRESHOLDS[cleaning_strategy]
@@ -61,3 +63,7 @@ def detect_clouds(season, site_name, cleaning_strategy="aggressive"):
         json.dump(clouds, f, indent=2)
 
     print(f"[CLOUDS] Saved: {output_file}")
+
+
+# Alias for backward compatibility
+preselect = detect_clouds

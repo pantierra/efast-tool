@@ -1,3 +1,4 @@
+"""Index generation: NDVI and GCC from S2/S3/fusion GeoTIFFs."""
 import json
 import numpy as np
 import rasterio
@@ -70,37 +71,37 @@ def _get_ndvi_from_original(input_file, site_position):
         with rasterio.open(input_file) as src:
             if src.count < 4:
                 return None
-            
+
             red = src.read(RED_BAND).astype(np.float32)
             nir = src.read(NIR_BAND).astype(np.float32)
-            
+
             lon, lat = site_position[1], site_position[0]
             x, y = transform_coords("EPSG:4326", src.crs, [lon], [lat])
-            
+
             if not (
                 src.bounds.left <= x[0] <= src.bounds.right
                 and src.bounds.bottom <= y[0] <= src.bounds.top
             ):
                 return None
-            
+
             row, col = src.index(x[0], y[0])
             if row < 0 or row >= src.height or col < 0 or col >= src.width:
                 return None
-            
+
             # Extract 3x3 window with boundary handling
             r0, r1 = max(0, row - 1), min(src.height, row + 2)
             c0, c1 = max(0, col - 1), min(src.width, col + 2)
             red_window = red[r0:r1, c0:c1]
             nir_window = nir[r0:r1, c0:c1]
-            
+
             # Calculate NDVI for each pixel in window
             mask = (red_window > 0) & (nir_window > 0) & ~np.isnan(red_window) & ~np.isnan(nir_window)
             if not np.any(mask):
                 return None
-            
+
             ndvi_window = np.zeros_like(red_window, dtype=np.float32)
             ndvi_window[mask] = (nir_window[mask] - red_window[mask]) / (nir_window[mask] + red_window[mask])
-            
+
             # Return mean of valid NDVI values
             valid_ndvi = ndvi_window[mask]
             return float(np.mean(valid_ndvi)) if len(valid_ndvi) > 0 else None
@@ -115,7 +116,7 @@ def _create_timeseries_for_dir(input_dir, output_dir, site_position, source_name
     for input_file in sorted(input_dir.glob(pattern)):
         if "DIST_CLOUD" in input_file.name:
             continue
-        
+
         filename = input_file.name
         parts = filename.replace(".geotiff", "").split("_")
         date_str = None
@@ -307,31 +308,31 @@ def _get_gcc_from_original(input_file, site_position):
         with rasterio.open(input_file) as src:
             if src.count < 3:
                 return None
-            
+
             blue = src.read(BLUE_BAND).astype(np.float32)
             green = src.read(GREEN_BAND).astype(np.float32)
             red = src.read(RED_BAND).astype(np.float32)
-            
+
             lon, lat = site_position[1], site_position[0]
             x, y = transform_coords("EPSG:4326", src.crs, [lon], [lat])
-            
+
             if not (
                 src.bounds.left <= x[0] <= src.bounds.right
                 and src.bounds.bottom <= y[0] <= src.bounds.top
             ):
                 return None
-            
+
             row, col = src.index(x[0], y[0])
             if row < 0 or row >= src.height or col < 0 or col >= src.width:
                 return None
-            
+
             # Extract 3x3 window with boundary handling
             r0, r1 = max(0, row - 1), min(src.height, row + 2)
             c0, c1 = max(0, col - 1), min(src.width, col + 2)
             blue_window = blue[r0:r1, c0:c1]
             green_window = green[r0:r1, c0:c1]
             red_window = red[r0:r1, c0:c1]
-            
+
             # Calculate GCC for each pixel in window
             total = red_window + green_window + blue_window
             mask = (total > 0) & ~np.isnan(total) & (blue_window >= 0) & (green_window >= 0) & (red_window >= 0)
@@ -340,10 +341,10 @@ def _get_gcc_from_original(input_file, site_position):
                 if negative_pixels > 0:
                     print(f"Warning: {input_file.name} excluded - all pixels have negative band values ({negative_pixels} negative pixels in window)")
                 return None
-            
+
             gcc_window = np.zeros_like(green_window, dtype=np.float32)
             gcc_window[mask] = green_window[mask] / total[mask]
-            
+
             # Return mean of valid GCC values
             valid_gcc = gcc_window[mask]
             return float(np.mean(valid_gcc)) if len(valid_gcc) > 0 else None
@@ -358,7 +359,7 @@ def _create_gcc_timeseries_for_dir(input_dir, output_dir, site_position, source_
     for input_file in sorted(input_dir.glob(pattern)):
         if "DIST_CLOUD" in input_file.name:
             continue
-        
+
         filename = input_file.name
         parts = filename.replace(".geotiff", "").split("_")
         date_str = None
@@ -451,3 +452,60 @@ def create_gcc_timeseries_post_process(season, site_position, site_name):
             input_dir = Path(f"data/{site_name}/{season}/{processed_dir}/fusion/")
             output_dir = Path(f"data/{site_name}/{season}/{processed_dir}/gcc/fusion/")
             _create_gcc_timeseries_for_dir(input_dir, output_dir, site_position, f"POST-PROCESS-FUSION-{strategy}-σ{sigma}")
+
+
+def _get_bands_from_original(input_file, site_position):
+    """Extract mean B02, B03, B04, B8A from 3x3 window at site. Returns dict or None."""
+    try:
+        with rasterio.open(input_file) as src:
+            if src.count < 4:
+                return None
+            lon, lat = site_position[1], site_position[0]
+            x, y = transform_coords("EPSG:4326", src.crs, [lon], [lat])
+            if not (
+                src.bounds.left <= x[0] <= src.bounds.right
+                and src.bounds.bottom <= y[0] <= src.bounds.top
+            ):
+                return None
+            row, col = src.index(x[0], y[0])
+            r0, r1 = max(0, row - 1), min(src.height, row + 2)
+            c0, c1 = max(0, col - 1), min(src.width, col + 2)
+            bands = [src.read(i + 1, window=((r0, r1), (c0, c1))).astype(np.float32) for i in range(4)]
+            mask = ~np.any([np.isnan(b) for b in bands], axis=0)
+            mask &= np.all([b > 0 for b in bands], axis=0)
+            if not np.any(mask):
+                return None
+            return {
+                "b02": float(np.mean(bands[0][mask])),
+                "b03": float(np.mean(bands[1][mask])),
+                "b04": float(np.mean(bands[2][mask])),
+                "b8a": float(np.mean(bands[3][mask])),
+            }
+    except Exception:
+        return None
+
+
+def _create_s2_bands_timeseries_for_dir(input_dir, output_dir, site_position):
+    print(f"[S2-BANDS] Creating timeseries.json...")
+    timeseries = []
+    for f in sorted(input_dir.glob("*.geotiff")):
+        date_str = f.stem.split("_")[0]
+        if len(date_str) != 8 or not date_str.isdigit():
+            continue
+        date = datetime.strptime(date_str, "%Y%m%d").isoformat()
+        bands = _get_bands_from_original(f, site_position)
+        timeseries.append({"date": date, "filename": f.name, **(bands or {})})
+    timeseries.sort(key=lambda x: x["date"])
+    output_dir.mkdir(parents=True, exist_ok=True)
+    (output_dir / "timeseries.json").write_text(json.dumps(timeseries, indent=2))
+    print(f"[S2-BANDS] Saved: {output_dir / 'timeseries.json'} ({len(timeseries)} entries)")
+
+
+def create_s2_bands_timeseries_post_process(season, site_position, site_name):
+    for strategy in ["aggressive", "nonaggressive"]:
+        for sigma in [20, 30]:
+            processed_dir = f"processed_{strategy}_sigma{sigma}"
+            input_dir = Path(f"data/{site_name}/{season}/{processed_dir}/s2/")
+            output_dir = Path(f"data/{site_name}/{season}/{processed_dir}/s2_bands/")
+            if input_dir.exists():
+                _create_s2_bands_timeseries_for_dir(input_dir, output_dir, site_position)
