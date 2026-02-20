@@ -47,7 +47,7 @@ def _reproject_raster_to_target(
     target_crs,
     width,
     height,
-    resampling=Resampling.cubic,
+    resampling=Resampling.bilinear,
 ):
     dst_transform = rasterio.transform.from_bounds(
         target_bounds.left,
