@@ -19,12 +19,12 @@ def run_pipeline(season, site_position, site_name):
     """Run pipeline from existing raw data (no downloads)."""
     try:
         # Download steps (skipped - use existing data in data/{site_name}/{season}/raw/)
-        download_s2(season, site_position, site_name)
+        #download_s2(season, site_position, site_name)
         # download_s3(season, site_position, site_name)
         # download_phenocam(season, site_position, site_name)
         # download_phenocam_greenness(season, site_position, site_name)
 
-        print(f"Generating NDVI for raw data: {site_name}, {season}")
+        #print(f"Generating NDVI for raw data: {site_name}, {season}")
         #create_ndvi_timeseries_raw(season, site_position, site_name)
 
         print(f"Running EFAST fusion for all scenarios: {site_name}, {season}")

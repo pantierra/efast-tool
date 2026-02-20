@@ -31,8 +31,13 @@ def process_cropped(season, site_position, site_name, cleaning_strategy="aggress
             valid = ~np.isnan(data) & (data > 0.001)
             rows = np.any(valid, axis=(0, 2))
             cols = np.any(valid, axis=(0, 1))
-            r0, r1 = np.where(rows)[0][[0, -1]]
-            c0, c1 = np.where(cols)[0][[0, -1]]
+            row_idx = np.where(rows)[0]
+            col_idx = np.where(cols)[0]
+            if len(row_idx) == 0 or len(col_idx) == 0:
+                print(f"[PROCESS] Skipping {fusion_file.name} (no valid pixels)")
+                continue
+            r0, r1 = row_idx[0], row_idx[-1]
+            c0, c1 = col_idx[0], col_idx[-1]
             w, h = c1 - c0 + 1, r1 - r0 + 1
             window = windows.Window(c0, r0, w, h)
             data_crop = src.read(window=window)
