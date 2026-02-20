@@ -12,7 +12,11 @@
         .selectors { margin-bottom: 20px; }
         .selectors select { padding: 5px 10px; font-size: 14px; margin-right: 15px; }
         h1 { margin: 0 0 5px 0; font-size: 22px; }
-        h2 { margin: 0 0 15px 0; font-size: 16px; color: #666; }
+        .season-row { padding-bottom: 15px; }
+        h2 { margin: 0; font-size: 16px; color: #666; display: inline; }
+        .download-links { margin-left: 10px; font-size: 14px; }
+        .download-links a { margin-right: 8px; color: #0066cc; text-decoration: none; }
+        .download-links a:hover { text-decoration: underline; }
         .plot { width: 100%; height: 100px; border: 1px solid #ccc; margin-bottom: 15px; }
         .plot-label { font-size: 12px; margin-bottom: 3px; color: #666; }
         #dateSlider { width: 100%; margin: 15px 0; }
@@ -27,23 +31,27 @@
 <body>
     <div class="container">
         <h1 id="siteName">Innsbruck</h1>
-        <h2 id="season">2024</h2>
+        <div class="season-row"><h2 id="season">2024</h2><span class="download-links" id="downloadLinks"></span></div>
         <div class="selectors">
             <label>Site:</label>
             <select id="siteSelect"></select>
             <label>Season:</label>
             <select id="seasonSelect"></select>
-            <label>Scenario:</label>
-            <select id="scenarioSelect">
-                <option value="aggressive_20">Aggressive σ20</option>
-                <option value="aggressive_30">Aggressive σ30</option>
-                <option value="nonaggressive_20">Non-aggressive σ20</option>
-                <option value="nonaggressive_30">Non-aggressive σ30</option>
+            <label>Source:</label>
+            <select id="sourceSelect">
+                <option value="s2">S2</option>
+                <option value="s3">S3</option>
+            </select>
+            <label>Exclusion:</label>
+            <select id="exclusionSelect">
+                <option value="none">None</option>
+                <option value="aggressive">Aggressive</option>
+                <option value="nonaggressive">Non-aggressive</option>
             </select>
         </div>
         <input type="range" id="dateSlider" min="0" max="365" value="0">
         <div id="dateDisplay">2024-01-01</div>
-        <div class="map-label">S2 RGB (closest available)</div>
+        <div class="map-label" id="mapLabel">S2 RGB (closest available)</div>
         <div id="s2rgbdate" class="map-date"></div>
         <div id="s2map"></div>
         <div id="bandPlots"></div>
@@ -59,6 +67,8 @@
             { key: "b8a", label: "B8A (NIR)", color: "#9900cc" }
         ];
         let siteName = "innsbruck", season = "2024";
+        let source = "s2";
+        let exclusion = "none";
         let sitePosition = [47.116171, 11.320308];
         let start = new Date(2024, 0, 1);
         let timeseries = [];
@@ -68,10 +78,11 @@
         let s2Map = null, s2Overlay = null, s2Marker = null;
 
         const urlParams = new URLSearchParams(location.search);
-        const [strategy, sigma] = (urlParams.get("scenario") || "aggressive_20").split("_");
 
-        function getBasePath() {
-            return `processed_${strategy}_sigma${sigma || "20"}`;
+        function filteredTimeseries(arr) {
+            if (exclusion === "none") return arr;
+            const key = exclusion === "aggressive" ? "excluded_aggressive" : "excluded_nonaggressive";
+            return arr.filter(t => !t[key]);
         }
 
         function fmtDate(d) {
@@ -92,7 +103,7 @@
             const w = canvas.width, h = canvas.height, pad = 30;
             const plotW = w - pad * 2, plotH = h - pad * 2;
 
-            const data = timeseries.filter(t => t[bandKey] != null);
+            const data = filteredTimeseries(timeseries).filter(t => t[bandKey] != null);
             if (!data.length) return;
 
             const dates = data.map(t => new Date(t.date));
@@ -157,7 +168,7 @@
             canvas.height = 100;
             const w = canvas.width, h = canvas.height, pad = 30;
             const plotW = w - pad * 2, plotH = h - pad * 2;
-            const data = ndviTimeseries.filter(t => t.ndvi != null);
+            const data = filteredTimeseries(ndviTimeseries).filter(t => t.ndvi != null);
             if (!data.length) return;
 
             const dates = data.map(t => new Date(t.date));
@@ -221,7 +232,7 @@
             canvas.height = 100;
             const w = canvas.width, h = canvas.height, pad = 30;
             const plotW = w - pad * 2, plotH = h - pad * 2;
-            const data = gccTimeseries.filter(t => t.greenness_index != null);
+            const data = filteredTimeseries(gccTimeseries).filter(t => t.greenness_index != null);
             if (!data.length) return;
 
             const dates = data.map(t => new Date(t.date));
@@ -283,25 +294,36 @@
             BANDS.forEach(b => drawBandPlot(`plot_${b.key}`, b.key, b.label, b.color));
         }
 
+        function computeGcc(entry) {
+            const b = entry.b02 + entry.b03 + entry.b04;
+            return b > 0 ? entry.b03 / b : null;
+        }
+
         async function loadTimeseries() {
-            const base = `../data/${siteName}/${season}/${getBasePath()}`;
+            const rawBase = `../data/${siteName}/${season}/raw`;
+            const src = document.getElementById("sourceSelect")?.value || "s2";
+            source = src;
             try {
-                const [bandsRes, gccRes, ndviRes] = await Promise.all([
-                    fetch(`${base}/s2_bands/timeseries.json`),
-                    fetch(`${base}/gcc/s2/timeseries.json`),
-                    fetch(`${base}/ndvi/s2/timeseries.json`)
-                ]);
-                timeseries = bandsRes.ok ? await bandsRes.json() : [];
-                gccTimeseries = gccRes.ok ? await gccRes.json() : [];
-                ndviTimeseries = ndviRes.ok ? await ndviRes.json() : [];
+                const preselectionRes = await fetch(`${rawBase}/preselection/${source}_preselection.json`);
+                const preselection = preselectionRes.ok ? await preselectionRes.json() : [];
+                timeseries = preselection;
+                ndviTimeseries = preselection;
+                gccTimeseries = preselection.map(t => ({ ...t, greenness_index: computeGcc(t) })).filter(t => t.greenness_index != null);
             } catch {
                 timeseries = [];
-                gccTimeseries = [];
                 ndviTimeseries = [];
+                gccTimeseries = [];
             }
+            const srcLabel = source.toUpperCase();
+            document.getElementById("mapLabel").textContent = `${srcLabel} RGB (closest available)`;
+            const jsonUrl = `${rawBase}/preselection/${source}_preselection.json`;
+            const csvUrl = `${rawBase}/preselection/${source}_preselection.csv`;
+            document.getElementById("downloadLinks").innerHTML =
+                `<a href="${jsonUrl}" download="${siteName}_${season}_${source}_preselection.json" target="_blank">[JSON]</a>` +
+                `<a href="${csvUrl}" download="${siteName}_${season}_${source}_preselection.csv" target="_blank">[CSV]</a>`;
             document.getElementById("bandPlots").innerHTML =
-                `<div class="plot-label">S2 NDVI</div><canvas id="plot_ndvi" class="plot"></canvas>` +
-                `<div class="plot-label">S2 GCC (Greenness Index)</div><canvas id="plot_gcc" class="plot"></canvas>` +
+                `<div class="plot-label">${srcLabel} NDVI</div><canvas id="plot_ndvi" class="plot"></canvas>` +
+                `<div class="plot-label">${srcLabel} GCC (Greenness Index)</div><canvas id="plot_gcc" class="plot"></canvas>` +
                 BANDS.map(b => `<div class="plot-label">${b.label}</div><canvas id="plot_${b.key}" class="plot"></canvas>`).join("");
             const yearEnd = new Date(parseInt(season), 11, 31);
             document.getElementById("dateSlider").max = Math.ceil((yearEnd - start) / 86400000);
@@ -312,7 +334,7 @@
 
         async function probeDataExists(sitename, s) {
             try {
-                const res = await fetch(`../data/${sitename}/${s}/processed_aggressive_sigma20/s2_bands/timeseries.json`, { method: "HEAD" });
+                const res = await fetch(`../data/${sitename}/${s}/raw/preselection/s2_preselection.json`, { method: "HEAD" });
                 return res.ok;
             } catch { return false; }
         }
@@ -381,7 +403,9 @@
                 `<option value="${s}">${s}</option>`
             ).join("");
             document.getElementById("seasonSelect").value = initialSeason;
-            document.getElementById("scenarioSelect").value = `${strategy}_${sigma || "20"}`;
+            document.getElementById("sourceSelect").value = urlParams.get("source") || "s2";
+            exclusion = urlParams.get("exclusion") || "none";
+            document.getElementById("exclusionSelect").value = exclusion;
 
             const initSite = getSiteBySitename(initialSite);
             if (initSite?.geometry?.coordinates) {
@@ -403,10 +427,18 @@
             document.getElementById("seasonSelect").addEventListener("change", function() {
                 setSiteSeason(siteSelect.value, this.value);
             });
-            document.getElementById("scenarioSelect").addEventListener("change", function() {
-                const p = new URLSearchParams(location.search);
-                p.set("scenario", this.value);
-                window.location.search = p.toString();
+            document.getElementById("sourceSelect").addEventListener("change", async function() {
+                source = this.value;
+                urlParams.set("source", source);
+                history.replaceState({}, "", `?${urlParams}`);
+                await loadTimeseries();
+            });
+            document.getElementById("exclusionSelect").addEventListener("change", function() {
+                exclusion = this.value;
+                urlParams.set("exclusion", exclusion);
+                history.replaceState({}, "", `?${urlParams}`);
+                drawAllPlots();
+                updateS2Imagery();
             });
 
             await setSiteSeason(initialSite, initialSeason);
@@ -420,7 +452,7 @@
 
         function closestFilename(dateStr) {
             const target = new Date(dateStr);
-            const withData = timeseries.filter(t => t.filename);
+            const withData = filteredTimeseries(timeseries).filter(t => t.filename);
             if (!withData.length) return null;
             const closest = withData.reduce((c, t) =>
                 Math.abs(new Date(t.date) - target) < Math.abs(new Date(c.date) - target) ? t : c
@@ -435,7 +467,7 @@
         }
 
         async function loadS2Geotiff(filename) {
-            const path = `../data/${siteName}/${season}/${getBasePath()}/s2/${filename}`;
+            const path = `../data/${siteName}/${season}/raw/${source}/${filename}`;
             const tiff = await GeoTIFF.fromArrayBuffer(await (await fetch(path)).arrayBuffer());
             const image = await tiff.getImage();
             const rasters = await image.readRasters();

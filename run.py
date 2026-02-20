@@ -15,6 +15,7 @@ from preselection import create_timeseries
 def run_pipeline(season, site_position, site_name):
     """Run pipeline (downloads + preselection)."""
     try:
+        print(f"Downloading S2, S3, and PhenoCam: {site_name}, {season}")
         download_s2(season, site_position, site_name)
         download_s3(season, site_position, site_name)
         download_phenocam(season, site_position, site_name)
@@ -41,11 +42,11 @@ def run_pipeline(season, site_position, site_name):
 
 
 if __name__ == "__main__":
-    #run_pipeline(2024, (35.3045, 25.0743), "forthgr")
-    run_pipeline(2024, (47.116171, 11.320308), "innsbruck")
-    #run_pipeline(2020, (47.116171, 11.320308), "innsbruck")
-    #run_pipeline(2024, (58.5633, 24.3688), "pitsalu")
-    #run_pipeline(2023, (64.2437, 19.7673), "vindeln2")
-    #run_pipeline(2024, (36.7455, -6.0033), "sunflowerjerez1")
-    #run_pipeline(2024, (42.6558, 26.9837), "institutekarnobat")
+    run_pipeline(2024, (35.3045, 25.0743), "forthgr")
+    #run_pipeline(2024, (47.116171, 11.320308), "innsbruck")
+    run_pipeline(2020, (47.116171, 11.320308), "innsbruck")
+    run_pipeline(2024, (58.5633, 24.3688), "pitsalu")
+    run_pipeline(2023, (64.2437, 19.7673), "vindeln2")
+    run_pipeline(2024, (36.7455, -6.0033), "sunflowerjerez1")
+    run_pipeline(2024, (42.6558, 26.9837), "institutekarnobat")
     

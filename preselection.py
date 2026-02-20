@@ -10,7 +10,8 @@ from datetime import datetime
 WINDOW_DAYS = 14
 MIN_WINDOW_SIZE = 3
 THRESHOLDS = {"aggressive": {"threshold": 0.3, "delta": 0.15}, "nonaggressive": {"threshold": 0.2, "delta": 0.25}}
-BLUE_MIN = 0.01
+# S2 uses reflectance * 10000, S3 uses 0-1
+BLUE_MIN = {"s2": 100, "s3": 0.01}
 
 GREEN_BAND = 2
 RED_BAND = 3
@@ -57,12 +58,13 @@ def _extract_date(filename):
     return None, None
 
 
-def _is_excluded(entry, entries, strategy):
+def _is_excluded(entry, entries, strategy, source="s2"):
     """True if entry is excluded by strategy (NDVI threshold/delta or dark blue)."""
     th = THRESHOLDS[strategy]
     if entry.get("ndvi") is None:
         return True
-    if entry.get("b02") is not None and entry["b02"] < BLUE_MIN:
+    blue_min = BLUE_MIN.get(source, BLUE_MIN["s2"])
+    if entry.get("b02") is not None and entry["b02"] < blue_min:
         return True
     entry_date = datetime.fromisoformat(entry["date"].replace("Z", "+00:00"))
     window_ndvi = []
@@ -110,8 +112,8 @@ def create_timeseries(season, site_position, site_name):
 
         timeseries.sort(key=lambda e: e["date"])
         for e in timeseries:
-            e["excluded_aggressive"] = _is_excluded(e, timeseries, "aggressive")
-            e["excluded_nonaggressive"] = _is_excluded(e, timeseries, "nonaggressive")
+            e["excluded_aggressive"] = _is_excluded(e, timeseries, "aggressive", source)
+            e["excluded_nonaggressive"] = _is_excluded(e, timeseries, "nonaggressive", source)
 
         with open(output_file, "w") as out:
             json.dump(timeseries, out, indent=2)
