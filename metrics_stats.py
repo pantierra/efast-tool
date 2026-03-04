@@ -246,7 +246,7 @@ def calculate_scenario_metrics(season, site_name, strategy, sigma, site_position
 
     # Load timeseries
     fusion_ts_path = base / processed_dir / "gcc" / "fusion" / "timeseries.json"
-    phenocam_ts_path = base / "raw" / "phenocam" / "timeseries.json"
+    phenocam_ts_path = base / "raw" / "phenocam" / "phenocam_gcc.json"
 
     fusion_ts = load_timeseries(fusion_ts_path)
     phenocam_ts = load_timeseries(phenocam_ts_path)
@@ -270,7 +270,7 @@ def calculate_all_metrics(season, site_name, site_position):
     base = Path(f"data/{site_name}/{season}")
 
     # Load phenocam timeseries once (same for all scenarios)
-    phenocam_ts_path = base / "raw" / "phenocam" / "timeseries.json"
+    phenocam_ts_path = base / "raw" / "phenocam" / "phenocam_gcc.json"
     phenocam_ts = load_timeseries(phenocam_ts_path)
 
     if not phenocam_ts:

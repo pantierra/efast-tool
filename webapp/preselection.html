@@ -8,7 +8,12 @@
     <script src="https://cdn.jsdelivr.net/npm/proj4@2.9.0/dist/proj4.js"></script>
     <style>
         body { margin: 0; font-family: sans-serif; }
-        .container { max-width: 900px; margin: 0 auto; padding: 20px; }
+        .nav { margin-bottom: 15px; font-size: 14px; }
+        .nav a { margin-right: 12px; color: #0066cc; text-decoration: none; }
+        .nav a:hover { text-decoration: underline; }
+        .nav a.active { font-weight: bold; }
+        .container { max-width: 1400px; margin: 0 auto; padding: 20px; }
+        .header-sticky { position: sticky; top: 0; background: white; z-index: 1000; border-bottom: 1px solid #ccc; padding-bottom: 20px; margin-bottom: 20px; }
         .selectors { margin-bottom: 20px; }
         .selectors select { padding: 5px 10px; font-size: 14px; margin-right: 15px; }
         h1 { margin: 0 0 5px 0; font-size: 22px; }
@@ -30,9 +35,17 @@
 </head>
 <body>
     <div class="container">
-        <h1 id="siteName">Innsbruck</h1>
-        <div class="season-row"><h2 id="season">2024</h2><span class="download-links" id="downloadLinks"></span></div>
-        <div class="selectors">
+        <div class="header-sticky">
+            <div class="nav">
+                <a href="index.html">Full</a>
+                <a href="preselection.html" class="active">Pre-selection</a>
+                <a href="prepared.html">Prepared</a>
+                <a href="fusion.html">Fusion</a>
+                <a href="postprocessed.html">Postprocessed</a>
+            </div>
+            <h1 id="siteName">Innsbruck</h1>
+            <div class="season-row"><h2 id="season">2024</h2><span class="download-links" id="downloadLinks"></span></div>
+            <div class="selectors">
             <label>Site:</label>
             <select id="siteSelect"></select>
             <label>Season:</label>
@@ -48,9 +61,10 @@
                 <option value="aggressive">Aggressive</option>
                 <option value="nonaggressive">Non-aggressive</option>
             </select>
+            </div>
+            <input type="range" id="dateSlider" min="0" max="365" value="0">
+            <div id="dateDisplay">2024-01-01</div>
         </div>
-        <input type="range" id="dateSlider" min="0" max="365" value="0">
-        <div id="dateDisplay">2024-01-01</div>
         <div class="map-label" id="mapLabel">S2 RGB (closest available)</div>
         <div id="s2rgbdate" class="map-date"></div>
         <div id="s2map"></div>
@@ -300,7 +314,7 @@
         }
 
         async function loadTimeseries() {
-            const rawBase = `../data/${siteName}/${season}/raw`;
+            const rawBase = `data/${siteName}/${season}/raw`;
             const src = document.getElementById("sourceSelect")?.value || "s2";
             source = src;
             try {
@@ -334,7 +348,7 @@
 
         async function probeDataExists(sitename, s) {
             try {
-                const res = await fetch(`../data/${sitename}/${s}/raw/preselection/s2_preselection.json`, { method: "HEAD" });
+                const res = await fetch(`data/${sitename}/${s}/raw/preselection/s2_preselection.json`, { method: "HEAD" });
                 return res.ok;
             } catch { return false; }
         }
@@ -366,7 +380,7 @@
 
         async function init() {
             try {
-                const res = await fetch("../data/sites.geojson");
+                const res = await fetch("data/sites.geojson");
                 window.sitesData = res.ok ? await res.json() : { features: [] };
             } catch {
                 window.sitesData = { features: [] };
@@ -467,7 +481,7 @@
         }
 
         async function loadS2Geotiff(filename) {
-            const path = `../data/${siteName}/${season}/raw/${source}/${filename}`;
+            const path = `data/${siteName}/${season}/raw/${source}/${filename}`;
             const tiff = await GeoTIFF.fromArrayBuffer(await (await fetch(path)).arrayBuffer());
             const image = await tiff.getImage();
             const rasters = await image.readRasters();

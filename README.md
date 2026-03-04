@@ -70,14 +70,14 @@ data/
 
 ## Web Viewer
 
-Run a local HTTP server to view the web interface:
+Run a local HTTP server from the **webapp** directory:
 
 ```bash
 cd webapp
 python3 -m http.server 8000
 ```
 
-Then open `http://localhost:8000/webapp` in your browser to visualize NDVI time series and compare S2, S3, and fusion outputs.
+Then open `http://localhost:8000/` in your browser. Data is served via the `webapp/data` symlink.
 
 ## License
 

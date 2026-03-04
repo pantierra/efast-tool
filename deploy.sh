@@ -55,8 +55,9 @@ if [ -f satellite-fusion-web.service ]; then
     systemctl daemon-reload
 fi
 
-# Create data directory
+# Create data directory and webapp/data symlink
 mkdir -p $DATA_DIR
+ln -sf ../data $APP_DIR/webapp/data
 ENDSSH
         echo "Setup complete!"
         ;;

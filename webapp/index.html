@@ -1,13 +1,17 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>NDVI Viewer</title>
+    <title>Full</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/geotiff@2.0.7/dist-browser/geotiff.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/proj4@2.9.0/dist/proj4.js"></script>
     <style>
         body { margin: 0; font-family: sans-serif; }
+        .nav { margin-bottom: 10px; font-size: 14px; }
+        .nav a { margin-right: 12px; color: #0066cc; text-decoration: none; }
+        .nav a:hover { text-decoration: underline; }
+        .nav a.active { font-weight: bold; }
         .slider-container { position: sticky; top: 0; background: white; padding: 20px; z-index: 1000; border-bottom: 1px solid #ccc; }
         .scenario-selector { margin-bottom: 10px; }
         .scenario-selector select { padding: 5px 10px; font-size: 14px; }
@@ -43,6 +47,13 @@
 </head>
 <body>
     <div class="container">
+        <div class="nav">
+            <a href="index.html" class="active">Full</a>
+            <a href="preselection.html">Pre-selection</a>
+            <a href="prepared.html">Prepared</a>
+            <a href="fusion.html">Fusion</a>
+            <a href="postprocessed.html">Postprocessed</a>
+        </div>
         <div class="slider-container">
             <input type="range" id="dateSlider" min="0" max="365" value="0">
             <div id="dateDisplay">2024-01-01</div>
@@ -186,13 +197,13 @@
             metricsData = null;
             const fusionPath = getFusionPath();
             const [s2, fusion, s3, s2gcc, fusiongcc, s3gcc, phenocam] = await Promise.all([
-                fetch(`../data/${siteName}/${season}/processed_${strategy}_sigma${sigma}/ndvi/s2/timeseries.json`).then(r => r.json()).catch(() => []),
-                fetch(`../data/${siteName}/${season}/${fusionPath}/ndvi/fusion/timeseries.json`).then(r => r.json()).catch(() => []),
-                fetch(`../data/${siteName}/${season}/processed_${strategy}_sigma${sigma}/ndvi/s3/timeseries.json`).then(r => r.json()).catch(() => []),
-                fetch(`../data/${siteName}/${season}/processed_${strategy}_sigma${sigma}/gcc/s2/timeseries.json`).then(r => r.json()).catch(() => []),
-                fetch(`../data/${siteName}/${season}/${fusionPath}/gcc/fusion/timeseries.json`).then(r => r.json()).catch(() => []),
-                fetch(`../data/${siteName}/${season}/processed_${strategy}_sigma${sigma}/gcc/s3/timeseries.json`).then(r => r.json()).catch(() => []),
-                fetch(`../data/${siteName}/${season}/raw/phenocam/timeseries.json`).then(r => r.json()).catch(() => [])
+                fetch(`data/${siteName}/${season}/processed_${strategy}_sigma${sigma}/ndvi/s2/timeseries.json`).then(r => r.json()).catch(() => []),
+                fetch(`data/${siteName}/${season}/${fusionPath}/ndvi/fusion/timeseries.json`).then(r => r.json()).catch(() => []),
+                fetch(`data/${siteName}/${season}/processed_${strategy}_sigma${sigma}/ndvi/s3/timeseries.json`).then(r => r.json()).catch(() => []),
+                fetch(`data/${siteName}/${season}/processed_${strategy}_sigma${sigma}/gcc/s2/timeseries.json`).then(r => r.json()).catch(() => []),
+                fetch(`data/${siteName}/${season}/${fusionPath}/gcc/fusion/timeseries.json`).then(r => r.json()).catch(() => []),
+                fetch(`data/${siteName}/${season}/processed_${strategy}_sigma${sigma}/gcc/s3/timeseries.json`).then(r => r.json()).catch(() => []),
+                fetch(`data/${siteName}/${season}/raw/phenocam/phenocam_gcc.json`).then(r => r.json()).catch(() => [])
             ]);
             timeseries = { s2, fusion, s3 };
             greennessTimeseries = { s2: s2gcc, fusion: fusiongcc, s3: s3gcc };
@@ -206,14 +217,14 @@
                 { name: "Non-aggressive σ30", path: "processed_nonaggressive_sigma30" }
             ];
             const scenarioPromises = scenarios.map(s => 
-                fetch(`../data/${siteName}/${season}/${s.path}/gcc/fusion/timeseries.json`).then(r => r.json()).catch(() => [])
+                fetch(`data/${siteName}/${season}/${s.path}/gcc/fusion/timeseries.json`).then(r => r.json()).catch(() => [])
             );
             const scenarioData = await Promise.all(scenarioPromises);
             scenarios.forEach((s, i) => { allScenariosGCC[s.name] = scenarioData[i]; });
             
             // Load metrics
             try {
-                const metricsRes = await fetch(`../data/${siteName}/${season}/metrics.json`);
+                const metricsRes = await fetch(`data/${siteName}/${season}/metrics.json`);
                 if (metricsRes.ok) metricsData = await metricsRes.json();
             } catch {}
             
@@ -685,30 +696,21 @@
         async function findFile(dateStr, source) {
             const target = new Date(dateStr);
             const basePath = source === "fusion" ? getFusionPath() : `processed_${strategy}_sigma${sigma}`;
-            // Search outward from target date (0, ±1, ±2, ±3, ...) until we find the closest file
-            // Check dates in order: exact, then -1, +1, then -2, +2, etc.
-            // Limit to ±365 days to avoid infinite search
+            const yearEnd = new Date(parseInt(season), 11, 31);
+            const seasonStart = start.getTime();
+            const seasonEnd = yearEnd.getTime();
             for (let offset = 0; offset <= 365; offset++) {
-                // Check exact date first (offset=0)
-                if (offset === 0) {
-                    const date = target.toISOString().split("T")[0].replace(/-/g, "");
+                const datesToTry = offset === 0
+                    ? [target]
+                    : [new Date(target.getTime() - offset * 86400000), new Date(target.getTime() + offset * 86400000)];
+                for (const d of datesToTry) {
+                    if (d.getTime() < seasonStart || d.getTime() > seasonEnd) continue;
+                    const date = d.toISOString().split("T")[0].replace(/-/g, "");
                     const filename = `${date}_0.geotiff`;
                     try {
-                        const res = await fetch(`../data/${siteName}/${season}/${basePath}/${source}/${filename}`, { method: 'HEAD' });
+                        const res = await fetch(`data/${siteName}/${season}/${basePath}/${source}/${filename}`, { method: 'HEAD' });
                         if (res.ok) return filename;
                     } catch {}
-                } else {
-                    // Check -offset and +offset days
-                    for (const dir of [-1, 1]) {
-                        const d = new Date(target);
-                        d.setDate(d.getDate() + offset * dir);
-                        const date = d.toISOString().split("T")[0].replace(/-/g, "");
-                        const filename = `${date}_0.geotiff`;
-                        try {
-                            const res = await fetch(`../data/${siteName}/${season}/${basePath}/${source}/${filename}`, { method: 'HEAD' });
-                            if (res.ok) return filename;
-                        } catch {}
-                    }
                 }
             }
             return null;
@@ -721,7 +723,7 @@
         
         async function loadGeotiff(source, filename) {
             const basePath = source === "fusion" ? getFusionPath() : `processed_${strategy}_sigma${sigma}`;
-            const path = `../data/${siteName}/${season}/${basePath}/${source}/${filename}`;
+            const path = `data/${siteName}/${season}/${basePath}/${source}/${filename}`;
             const tiff = await GeoTIFF.fromArrayBuffer(await (await fetch(path)).arrayBuffer());
             const image = await tiff.getImage();
             const rasters = await image.readRasters();
@@ -786,7 +788,7 @@
                     const d = new Date(target);
                     d.setDate(d.getDate() + offset * dir);
                     const date = d.toISOString().split("T")[0].replace(/-/g, "");
-                    const url = `../data/${siteName}/${season}/raw/phenocam/${date}.jpg`;
+                    const url = `data/${siteName}/${season}/raw/phenocam/${date}.jpg`;
                     try {
                         const res = await fetch(url, { method: 'HEAD' });
                         if (res.ok) {
@@ -862,7 +864,7 @@
 
         async function probeDataExists(sitename, season) {
             try {
-                const res = await fetch(`../data/${sitename}/${season}/metrics.json`, { method: "HEAD" });
+                const res = await fetch(`data/${sitename}/${season}/metrics.json`, { method: "HEAD" });
                 return res.ok;
             } catch { return false; }
         }
@@ -905,7 +907,7 @@
         
         async function init() {
             try {
-                const res = await fetch("../data/sites.geojson");
+                const res = await fetch("data/sites.geojson");
                 if (!res.ok) throw new Error("Could not load sites");
                 sitesData = await res.json();
             } catch (e) {
@@ -922,7 +924,7 @@
                 for (const s of seasonsFromGeo) {
                     if (await probeDataExists(sn, s)) withData.push(s);
                 }
-                if (withData.length) availableSiteSeasons[sn] = withData;
+                availableSiteSeasons[sn] = withData.length ? withData : seasonsFromGeo;
             }
             const availableSites = Object.keys(availableSiteSeasons);
             siteSelect.innerHTML = "";

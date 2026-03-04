@@ -96,13 +96,20 @@ def process_cropped(season, site_position, site_name, cleaning_strategy="aggress
     print("[PROCESS] Completed")
 
 
-def process_all_scenarios(season, site_position, site_name):
-    """Process all 4 EFAST scenarios."""
+def post_process_all_scenarios(season, site_position, site_name):
+    """Crop fusion/S2/S3 to valid pixels for all 4 scenarios."""
     for strategy in ["aggressive", "nonaggressive"]:
         for sigma in [None, 30]:
             process_cropped(season, site_position, site_name, cleaning_strategy=strategy, sigma=sigma)
 
 
-# Aliases
-postprocess = process_cropped
-postprocess_all_scenarios = process_all_scenarios
+def post_process_timeseries(season, site_position, site_name):
+    """Generate NDVI, GCC, and S2 bands timeseries for all 4 scenarios."""
+    from metrics_indices import (
+        create_ndvi_timeseries_post_process,
+        create_gcc_timeseries_post_process,
+        create_bands_timeseries_post_process,
+    )
+    create_ndvi_timeseries_post_process(season, site_position, site_name)
+    create_gcc_timeseries_post_process(season, site_position, site_name)
+    create_bands_timeseries_post_process(season, site_position, site_name)

@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Postprocessed Viewer</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/geotiff@2.0.7/dist-browser/geotiff.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/proj4@2.9.0/dist/proj4.js"></script>
+    <style>
+        body { margin: 0; font-family: sans-serif; }
+        .nav { margin-bottom: 15px; font-size: 14px; }
+        .nav a { margin-right: 12px; color: #0066cc; text-decoration: none; }
+        .nav a:hover { text-decoration: underline; }
+        .nav a.active { font-weight: bold; }
+        .container { max-width: 900px; margin: 0 auto; padding: 20px; }
+        .selectors { margin-bottom: 20px; }
+        .selectors select { padding: 5px 10px; font-size: 14px; margin-right: 15px; }
+        h1 { margin: 0 0 5px 0; font-size: 22px; }
+        .season-row { padding-bottom: 15px; }
+        h2 { margin: 0; font-size: 16px; color: #666; display: inline; }
+        #dateSlider { width: 100%; margin: 15px 0; }
+        #dateDisplay { text-align: center; font-size: 14px; color: #666; }
+        .map-label { font-size: 12px; margin-bottom: 3px; color: #666; }
+        .map-date { font-size: 11px; margin-top: 3px; color: #999; }
+        .plot-label { font-size: 12px; margin-bottom: 3px; color: #666; }
+        .plot { width: 100%; height: 100px; border: 1px solid #ccc; margin-bottom: 15px; }
+        #postprocessedMap { height: 500px; border: 1px solid #ccc; margin-top: 10px; }
+        .leaflet-image-layer { image-rendering: pixelated; }
+        .leaflet-control-attribution { display: none; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="nav">
+            <a href="index.html">Full</a>
+            <a href="preselection.html">Pre-selection</a>
+            <a href="prepared.html">Prepared</a>
+            <a href="fusion.html">Fusion</a>
+            <a href="postprocessed.html" class="active">Postprocessed</a>
+        </div>
+        <h1 id="siteName">Innsbruck</h1>
+        <div class="season-row"><h2 id="season">2024</h2></div>
+        <div class="selectors">
+            <label>Site:</label>
+            <select id="siteSelect"></select>
+            <label>Season:</label>
+            <select id="seasonSelect"></select>
+            <label>Strategy:</label>
+            <select id="strategySelect">
+                <option value="aggressive">Aggressive</option>
+                <option value="nonaggressive">Non-aggressive</option>
+            </select>
+            <label>Sigma:</label>
+            <select id="sigmaSelect">
+                <option value="20">σ=20</option>
+                <option value="30">σ=30</option>
+            </select>
+            <label>Source:</label>
+            <select id="sourceSelect">
+                <option value="s2">S2</option>
+                <option value="fusion">Fusion</option>
+                <option value="s3">S3</option>
+            </select>
+        </div>
+        <input type="range" id="dateSlider" min="0" max="365" value="0">
+        <div id="dateDisplay">2024-01-01</div>
+        <div class="map-label">Postprocessed RGB (closest available)</div>
+        <div id="mapDate" class="map-date"></div>
+        <div id="postprocessedMap"></div>
+        <div id="plots">
+            <div class="plot-label">NDVI</div><canvas id="plot_ndvi" class="plot"></canvas>
+            <div class="plot-label">GCC</div><canvas id="plot_gcc" class="plot"></canvas>
+            <div class="plot-label">B02 (Blue)</div><canvas id="plot_b02" class="plot"></canvas>
+            <div class="plot-label">B03 (Green)</div><canvas id="plot_b03" class="plot"></canvas>
+            <div class="plot-label">B04 (Red)</div><canvas id="plot_b04" class="plot"></canvas>
+            <div class="plot-label">B8A (NIR)</div><canvas id="plot_b8a" class="plot"></canvas>
+        </div>
+    </div>
+    <script>
+        proj4.defs("EPSG:32632", "+proj=utm +zone=32 +datum=WGS84 +units=m +no_defs");
+        proj4.defs("EPSG:4326", "+proj=longlat +datum=WGS84 +no_defs");
+
+        let siteName = "innsbruck", season = "2024";
+        let strategy = "aggressive", sigma = "20", source = "s2";
+        let sitePosition = [47.116171, 11.320308];
+        let start = new Date(2024, 0, 1);
+        let availableSiteSeasons = {};
+        let postprocessedMap = null, overlay = null, marker = null;
+        let ndviTs = [], gccTs = [], bandsTs = [];
+        const BANDS = [{key:"b02",color:"#0066ff"},{key:"b03",color:"#00aa00"},{key:"b04",color:"#cc0000"},{key:"b8a",color:"#9900cc"}];
+        const urlParams = new URLSearchParams(location.search);
+        const osmUrl = "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png";
+
+        const fmtDate = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+        const dateFromDays = (days) => fmtDate(new Date(start.getTime() + days * 86400000));
+        const daysFromDate = (dateStr) => {
+            const [y, m, d] = dateStr.split("-").map(Number);
+            return Math.floor((new Date(y, m - 1, d) - start) / 86400000);
+        };
+
+        function getProcessedPath() {
+            return `data/${siteName}/${season}/processed_${strategy}_sigma${sigma}`;
+        }
+
+        async function loadTimeseries() {
+            try {
+                const [n, g, b] = await Promise.all([
+                    fetch(`${getProcessedPath()}/ndvi/${source}/timeseries.json`).then(r => r.ok ? r.json() : []),
+                    fetch(`${getProcessedPath()}/gcc/${source}/timeseries.json`).then(r => r.ok ? r.json() : []),
+                    fetch(`${getProcessedPath()}/bands/${source}/timeseries.json`).then(r => r.ok ? r.json() : [])
+                ]);
+                ndviTs = n; gccTs = g; bandsTs = b;
+            } catch { ndviTs = []; gccTs = []; bandsTs = []; }
+            drawPlots();
+        }
+
+        function drawPlot(canvasId, data, key, color) {
+            const canvas = document.getElementById(canvasId);
+            if (!canvas) return;
+            const ctx = canvas.getContext("2d");
+            canvas.width = canvas.offsetWidth;
+            canvas.height = 100;
+            const w = canvas.width, h = canvas.height, pad = 30;
+            const plotW = w - pad * 2, plotH = h - pad * 2;
+            const pts = data.filter(t => t[key] != null);
+            if (!pts.length) { ctx.clearRect(0, 0, canvas.width, canvas.height); ctx.fillStyle = "#999"; ctx.font = "12px sans-serif"; ctx.fillText("No data", pad, pad + plotH / 2); return; }
+            const dates = pts.map(t => new Date(t.date));
+            const vals = pts.map(t => t[key]);
+            const minD = new Date(Math.min(...dates)), maxD = new Date(Math.max(...dates));
+            const minV = Math.min(...vals), maxV = Math.max(...vals);
+            const dRange = maxD - minD || 1, vRange = maxV - minV || 1;
+            const x = d => pad + ((new Date(d) - minD) / dRange) * plotW;
+            const y = v => pad + plotH - ((v - minV) / vRange) * plotH;
+            ctx.clearRect(0, 0, w, h);
+            ctx.strokeStyle = "#ccc";
+            ctx.beginPath(); ctx.moveTo(pad, pad); ctx.lineTo(pad, pad + plotH); ctx.lineTo(pad + plotW, pad + plotH); ctx.stroke();
+            ctx.fillStyle = "#000";
+            ctx.font = "9px sans-serif";
+            ctx.fillText(minV.toFixed(3), 2, pad + plotH + 10);
+            ctx.fillText(maxV.toFixed(3), 2, pad + 3);
+            ctx.strokeStyle = color;
+            ctx.beginPath();
+            pts.forEach((t, i) => { const px = x(t.date), py = y(t[key]); i ? ctx.lineTo(px, py) : ctx.moveTo(px, py); });
+            ctx.stroke();
+            const curDate = dateFromDays(parseInt(document.getElementById("dateSlider").value));
+            const xPos = x(curDate);
+            ctx.strokeStyle = "#f00";
+            ctx.lineWidth = 2;
+            ctx.beginPath(); ctx.moveTo(xPos, pad); ctx.lineTo(xPos, pad + plotH); ctx.stroke();
+            const closest = pts.reduce((c, t) => Math.abs(new Date(t.date) - new Date(curDate)) < Math.abs(new Date(c.date) - new Date(curDate)) ? t : c);
+            if (closest) { ctx.fillStyle = "#f00"; ctx.font = "bold 10px sans-serif"; ctx.fillText(closest[key].toFixed(3), xPos + 5, y(closest[key]) - 5); }
+        }
+
+        function drawPlots() {
+            drawPlot("plot_ndvi", ndviTs, "ndvi", "#2d7a3e");
+            drawPlot("plot_gcc", gccTs, "greenness_index", "#00aa00");
+            BANDS.forEach(b => drawPlot(`plot_${b.key}`, bandsTs, b.key, b.color));
+        }
+
+        async function findProcessedFile(dateStr) {
+            const target = new Date(dateStr);
+            const yearEnd = new Date(parseInt(season), 11, 31);
+            const seasonStart = start.getTime();
+            const seasonEnd = yearEnd.getTime();
+            for (let offset = 0; offset <= 365; offset++) {
+                for (const dir of offset === 0 ? [0] : [-1, 1]) {
+                    const d = new Date(target.getTime() + dir * offset * 86400000);
+                    if (d.getTime() < seasonStart || d.getTime() > seasonEnd) continue;
+                    const ds = d.toISOString().split("T")[0].replace(/-/g, "");
+                    const filename = `${ds}_0.geotiff`;
+                    try {
+                        const res = await fetch(`${getProcessedPath()}/${source}/${filename}`, { method: "HEAD" });
+                        if (res.ok) return filename;
+                    } catch {}
+                }
+            }
+            return null;
+        }
+
+        function transformBounds(bbox, fromCRS) {
+            const sw = proj4(fromCRS, "EPSG:4326", [bbox[0], bbox[1]]);
+            const ne = proj4(fromCRS, "EPSG:4326", [bbox[2], bbox[3]]);
+            return [[sw[1], sw[0]], [ne[1], ne[0]]];
+        }
+
+        async function loadGeotiff(filename) {
+            const path = `${getProcessedPath()}/${source}/${filename}`;
+            const tiff = await GeoTIFF.fromArrayBuffer(await (await fetch(path)).arrayBuffer());
+            const image = await tiff.getImage();
+            const rasters = await image.readRasters();
+            const width = image.getWidth(), height = image.getHeight();
+            const bbox = image.getBoundingBox();
+            const geoKeys = image.getGeoKeys();
+            const crsCode = geoKeys.ProjectedCSTypeGeoKey ? `EPSG:${geoKeys.ProjectedCSTypeGeoKey}` :
+                (geoKeys.GeographicTypeGeoKey !== 4326 ? `EPSG:${geoKeys.GeographicTypeGeoKey}` : "EPSG:4326");
+            const [blue, green, red] = [0, 1, 2].map(i => Array.from(rasters[i]));
+            const normalize = (arr) => {
+                let min = Infinity, max = -Infinity;
+                for (const v of arr) if (!isNaN(v) && v > 0) { min = Math.min(min, v); max = Math.max(max, v); }
+                return arr.map(v => Math.max(0, Math.min(255, ((v - min) / (max - min || 1)) * 255)));
+            };
+            const [rN, gN, bN] = [red, green, blue].map(normalize);
+            const canvas = Object.assign(document.createElement("canvas"), { width, height });
+            const ctx = canvas.getContext("2d");
+            ctx.imageSmoothingEnabled = false;
+            const imgData = ctx.createImageData(width, height);
+            for (let i = 0; i < rN.length; i++) {
+                const idx = i * 4;
+                if (rN[i] === 0 && gN[i] === 0 && bN[i] === 0) imgData.data[idx + 3] = 0;
+                else { imgData.data[idx] = rN[i]; imgData.data[idx + 1] = gN[i]; imgData.data[idx + 2] = bN[i]; imgData.data[idx + 3] = 255; }
+            }
+            ctx.putImageData(imgData, 0, 0);
+            const bounds = crsCode === "EPSG:4326" ? [[bbox[1], bbox[0]], [bbox[3], bbox[2]]] : transformBounds(bbox, crsCode);
+            const dateStr = filename.replace("_0.geotiff", "");
+            return { dataUrl: canvas.toDataURL(), bounds, dateStr };
+        }
+
+        async function updateMap() {
+            const dateStr = dateFromDays(parseInt(document.getElementById("dateSlider").value));
+            const filename = await findProcessedFile(dateStr);
+            if (!filename || !postprocessedMap) {
+                if (overlay) { postprocessedMap.removeLayer(overlay); overlay = null; }
+                document.getElementById("mapDate").textContent = "";
+                return;
+            }
+            try {
+                const { dataUrl, bounds, dateStr: ds } = await loadGeotiff(filename);
+                if (overlay) postprocessedMap.removeLayer(overlay);
+                overlay = L.imageOverlay(dataUrl, bounds, { opacity: 0.95 }).addTo(postprocessedMap);
+                postprocessedMap.fitBounds(bounds);
+                document.getElementById("mapDate").textContent = `${ds.slice(0,4)}-${ds.slice(4,6)}-${ds.slice(6,8)}`;
+            } catch (e) {
+                if (overlay) { postprocessedMap.removeLayer(overlay); overlay = null; }
+                document.getElementById("mapDate").textContent = "";
+            }
+        }
+
+        async function probeDataExists(sitename, s) {
+            try {
+                const res = await fetch(`data/${sitename}/${s}/metrics.json`, { method: "HEAD" });
+                return res.ok;
+            } catch { return false; }
+        }
+
+        function getSiteBySitename(sn) {
+            return window.sitesData?.features?.find(f => f.properties?.sitename === sn);
+        }
+
+        async function setSiteSeason(newSite, newSeason) {
+            siteName = newSite;
+            season = newSeason;
+            start = new Date(parseInt(season), 0, 1);
+            const site = getSiteBySitename(newSite);
+            if (site?.geometry?.coordinates) {
+                const [lon, lat] = site.geometry.coordinates;
+                sitePosition = [lat, lon];
+            }
+            if (postprocessedMap) { postprocessedMap.setView(sitePosition, 12); if (marker) marker.setLatLng(sitePosition); }
+            document.getElementById("siteName").textContent = (site?.properties?.description || newSite);
+            document.getElementById("season").textContent = season;
+            const yearEnd = new Date(parseInt(season), 11, 31);
+            document.getElementById("dateSlider").max = Math.ceil((yearEnd - start) / 86400000);
+            const params = new URLSearchParams(location.search);
+            params.set("site", siteName);
+            params.set("season", season);
+            history.replaceState({}, "", `?${params}`);
+            const urlDate = params.get("date");
+            if (urlDate) document.getElementById("dateSlider").value = daysFromDate(urlDate);
+            document.getElementById("dateDisplay").textContent = dateFromDays(parseInt(document.getElementById("dateSlider").value));
+            await loadTimeseries();
+            await updateMap();
+        }
+
+        async function init() {
+            try {
+                const res = await fetch("data/sites.geojson");
+                window.sitesData = res.ok ? await res.json() : { features: [] };
+            } catch { window.sitesData = { features: [] }; }
+            const features = window.sitesData.features || [];
+            for (const f of features) {
+                const sn = f.properties?.sitename;
+                if (!sn) continue;
+                const seasonsFromGeo = f.properties?.seasons ? Object.keys(f.properties.seasons).sort() : [];
+                const withData = [];
+                for (const s of seasonsFromGeo) {
+                    if (await probeDataExists(sn, s)) withData.push(s);
+                }
+                if (withData.length) availableSiteSeasons[sn] = withData;
+            }
+            const availableSites = Object.keys(availableSiteSeasons);
+            const siteSelect = document.getElementById("siteSelect");
+            siteSelect.innerHTML = "";
+            (availableSites.length ? availableSites.sort() : ["innsbruck"]).forEach(sn => {
+                const opt = document.createElement("option");
+                opt.value = sn;
+                opt.textContent = sn;
+                siteSelect.appendChild(opt);
+                if (!availableSiteSeasons[sn]) availableSiteSeasons[sn] = ["2024"];
+            });
+
+            const urlSite = urlParams.get("site");
+            const urlSeason = urlParams.get("season");
+            const initialSite = (urlSite && availableSiteSeasons[urlSite]) ? urlSite : (availableSites[0] || "innsbruck");
+            const initialSeason = (urlSeason && (availableSiteSeasons[initialSite] || []).includes(urlSeason)) ? urlSeason : ((availableSiteSeasons[initialSite] || [])[0] || "2024");
+
+            siteSelect.value = initialSite;
+            document.getElementById("seasonSelect").innerHTML = (availableSiteSeasons[initialSite] || []).map(s =>
+                `<option value="${s}">${s}</option>`
+            ).join("");
+            document.getElementById("seasonSelect").value = initialSeason;
+            strategy = urlParams.get("strategy") || "aggressive";
+            sigma = urlParams.get("sigma") || "20";
+            source = urlParams.get("source") || "s2";
+            document.getElementById("strategySelect").value = strategy;
+            document.getElementById("sigmaSelect").value = sigma;
+            document.getElementById("sourceSelect").value = source;
+
+            const initSite = getSiteBySitename(initialSite);
+            if (initSite?.geometry?.coordinates) {
+                const [lon, lat] = initSite.geometry.coordinates;
+                sitePosition = [lat, lon];
+            }
+            postprocessedMap = L.map("postprocessedMap", { zoomControl: false }).setView(sitePosition, 12)
+                .addLayer(L.tileLayer(osmUrl, { attribution: "OpenStreetMap", opacity: 0.4 }));
+            marker = L.marker(sitePosition, { icon: L.divIcon({ className: "site-marker", html: "<div style='width:8px;height:8px;background:red;border:2px solid white;border-radius:50%;box-shadow:0 0 2px rgba(0,0,0,0.5);'></div>", iconSize: [8, 8] }) }).addTo(postprocessedMap);
+
+            siteSelect.addEventListener("change", function() {
+                const sn = this.value;
+                const seas = availableSiteSeasons[sn] || [];
+                document.getElementById("seasonSelect").innerHTML = seas.map(s => `<option value="${s}">${s}</option>`).join("");
+                document.getElementById("seasonSelect").value = seas[0] || "2024";
+                setSiteSeason(sn, document.getElementById("seasonSelect").value);
+            });
+            document.getElementById("seasonSelect").addEventListener("change", function() {
+                setSiteSeason(siteSelect.value, this.value);
+            });
+            document.getElementById("strategySelect").addEventListener("change", function() {
+                strategy = this.value;
+                urlParams.set("strategy", strategy);
+                history.replaceState({}, "", `?${urlParams}`);
+                loadTimeseries(); updateMap();
+            });
+            document.getElementById("sigmaSelect").addEventListener("change", function() {
+                sigma = this.value;
+                urlParams.set("sigma", sigma);
+                history.replaceState({}, "", `?${urlParams}`);
+                loadTimeseries(); updateMap();
+            });
+            document.getElementById("sourceSelect").addEventListener("change", function() {
+                source = this.value;
+                urlParams.set("source", source);
+                history.replaceState({}, "", `?${urlParams}`);
+                loadTimeseries(); updateMap();
+            });
+
+            await setSiteSeason(initialSite, initialSeason);
+        }
+
+        document.getElementById("dateSlider").addEventListener("input", function() {
+            document.getElementById("dateDisplay").textContent = dateFromDays(parseInt(this.value));
+            drawPlots(); updateMap();
+        });
+
+        init();
+    </script>
+</body>
+</html>

@@ -76,7 +76,7 @@ def _create_timeseries_for_dir(input_dir, output_dir, site_position, source_name
             continue
 
         filename = input_file.name
-        parts = filename.replace(".geotiff", "").split("_")
+        parts = filename.replace(".geotiff", "").replace(".tif", "").split("_")
         date_str = None
 
         for part in parts:
@@ -316,7 +316,7 @@ def _create_gcc_timeseries_for_dir(input_dir, output_dir, site_position, source_
             continue
 
         filename = input_file.name
-        parts = filename.replace(".geotiff", "").split("_")
+        parts = filename.replace(".geotiff", "").replace(".tif", "").split("_")
         date_str = None
 
         for part in parts:
@@ -440,12 +440,15 @@ def _get_bands_from_original(input_file, site_position):
         return None
 
 
-def _create_s2_bands_timeseries_for_dir(input_dir, output_dir, site_position):
-    print(f"[S2-BANDS] Creating timeseries.json...")
+def _create_bands_timeseries_for_dir(input_dir, output_dir, site_position, source_name, pattern="*.geotiff"):
+    print(f"[BANDS-{source_name}] Creating timeseries.json...")
     timeseries = []
-    for f in sorted(input_dir.glob("*.geotiff")):
-        date_str = f.stem.split("_")[0]
-        if len(date_str) != 8 or not date_str.isdigit():
+    for f in sorted(input_dir.glob(pattern)):
+        if "DIST_CLOUD" in f.name:
+            continue
+        parts = f.name.replace(".geotiff", "").replace(".tif", "").split("_")
+        date_str = next((p for p in parts if len(p) == 8 and p.isdigit()), None)
+        if not date_str:
             continue
         date = datetime.strptime(date_str, "%Y%m%d").isoformat()
         bands = _get_bands_from_original(f, site_position)
@@ -453,14 +456,33 @@ def _create_s2_bands_timeseries_for_dir(input_dir, output_dir, site_position):
     timeseries.sort(key=lambda x: x["date"])
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "timeseries.json").write_text(json.dumps(timeseries, indent=2))
-    print(f"[S2-BANDS] Saved: {output_dir / 'timeseries.json'} ({len(timeseries)} entries)")
+    print(f"[BANDS-{source_name}] Saved: {output_dir / 'timeseries.json'} ({len(timeseries)} entries)")
 
 
-def create_s2_bands_timeseries_post_process(season, site_position, site_name):
+def create_prepared_fusion_timeseries(season, site_position, site_name):
+    """Generate NDVI, GCC, and band timeseries for prepared S2/S3 and fusion outputs."""
+    for strategy in ["aggressive", "nonaggressive"]:
+        base = Path(f"data/{site_name}/{season}/prepared_{strategy}")
+        for source in ["s2", "s3"]:
+            inp = base / source
+            if inp.exists():
+                _create_timeseries_for_dir(inp, base / "ndvi" / source, site_position, f"PREPARED-{source.upper()}-{strategy}", "*.tif")
+                _create_gcc_timeseries_for_dir(inp, base / "gcc" / source, site_position, f"PREPARED-{source.upper()}-{strategy}", "*.tif")
+                _create_bands_timeseries_for_dir(inp, base / "bands" / source, site_position, f"PREPARED-{source.upper()}-{strategy}", "*.tif")
+        for sig, fusion_sub in [(None, "fusion"), (30, "fusion_sigma30")]:
+            inp = base / fusion_sub
+            if inp.exists():
+                _create_timeseries_for_dir(inp, base / "ndvi" / fusion_sub, site_position, f"FUSION-{strategy}-σ{sig or 20}", "*.tif")
+                _create_gcc_timeseries_for_dir(inp, base / "gcc" / fusion_sub, site_position, f"FUSION-{strategy}-σ{sig or 20}", "*.tif")
+                _create_bands_timeseries_for_dir(inp, base / "bands" / fusion_sub, site_position, f"FUSION-{strategy}-σ{sig or 20}", "*.tif")
+
+
+def create_bands_timeseries_post_process(season, site_position, site_name):
     for strategy in ["aggressive", "nonaggressive"]:
         for sigma in [20, 30]:
             processed_dir = f"processed_{strategy}_sigma{sigma}"
-            input_dir = Path(f"data/{site_name}/{season}/{processed_dir}/s2/")
-            output_dir = Path(f"data/{site_name}/{season}/{processed_dir}/s2_bands/")
-            if input_dir.exists():
-                _create_s2_bands_timeseries_for_dir(input_dir, output_dir, site_position)
+            base = Path(f"data/{site_name}/{season}/{processed_dir}")
+            for source in ["s2", "s3", "fusion"]:
+                inp, out = base / source, base / "bands" / source
+                if inp.exists():
+                    _create_bands_timeseries_for_dir(inp, out, site_position, f"POST-{source.upper()}-{strategy}-σ{sigma}", "*.geotiff")

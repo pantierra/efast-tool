@@ -71,6 +71,25 @@ def _reproject_raster_to_target(
             rio_shutil.copy(vrt, dst_path, **profile)
 
 
+def _rescale_dist_cloud_for_small_roi(s2_output_dir):
+    """Rescale DIST_CLOUD when max distance ≤1 so EFAST fusion gets valid weights.
+
+    EFAST uses wo_i = (distance - 1) / D; values ≤1 yield zero/NaN weights. In small
+    ROIs (e.g. PhenoCam sites, 7×4 LR grid), distance_transform_edt never exceeds 1.
+    Scale non-zero values to ≥2 so fusion can produce non-NaN output.
+    """
+    for dc_path in s2_output_dir.glob("*DIST_CLOUD.tif"):
+        with rasterio.open(dc_path, "r") as src:
+            d = src.read(1)
+        d_max = float(np.nanmax(d))
+        if d_max <= 1:
+            # Map (0, 1] -> (0, 2] so (d-1)/15 gives positive weight
+            d_scaled = np.where(d > 0, 2.0, d).astype(np.float32)
+            with rasterio.open(dc_path, "r+") as dst:
+                dst.write(d_scaled, 1)
+            print(f"[S2-PREP] Rescaled DIST_CLOUD for {dc_path.name} (max was {d_max})")
+
+
 def prepare_s2(season, site_position, site_name, cleaning_strategy="aggressive", date_range=None):
     lat, lon = site_position
     s2_dir = Path(f"data/{site_name}/{season}/raw/s2/")
@@ -120,6 +139,7 @@ def prepare_s2(season, site_position, site_name, cleaning_strategy="aggressive",
     print(f"[S2-PREP] Computing distance-to-clouds...")
     distance_to_clouds = _import_distance_to_clouds()
     distance_to_clouds(s2_output_dir, ratio=RESOLUTION_RATIO)
+    _rescale_dist_cloud_for_small_roi(s2_output_dir)
     print("[S2-PREP] Completed")
 
 
