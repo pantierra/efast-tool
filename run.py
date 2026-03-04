@@ -1,4 +1,4 @@
-# from fusion import run_all_efast_scenarios
+from fusion import run_all_efast_scenarios
 # from postprocessing import process_all_scenarios
 # from metrics_indices import (
 #     create_ndvi_timeseries_post_process,
@@ -31,6 +31,7 @@ def run_pipeline(season, site_position, site_name):
 
         print(f"Running EFAST fusion for all scenarios: {site_name}, {season}")
         run_all_efast_scenarios(season, site_position, site_name)
+        
         # print(f"Post-processing data: {site_name}, {season}")
         # process_all_scenarios(season, site_position, site_name)
         # print(f"Generating NDVI for final outputs: {site_name}, {season}")

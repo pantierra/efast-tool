@@ -1,14 +1,7 @@
 """EFAST fusion: S2/S3 reflectance fusion for four scenarios."""
-from pathlib import Path
 from datetime import datetime, timedelta
 
-from preselection import create_timeseries
-from preparation import (
-    prepare_s2,
-    prepare_s3,
-    _get_base_dir,
-    RESOLUTION_RATIO,
-)
+from preparation import _get_base_dir, RESOLUTION_RATIO
 
 
 def _import_efast():
@@ -68,9 +61,7 @@ def run_efast(season, site_position, site_name, cleaning_strategy="aggressive", 
 
 
 def run_all_efast_scenarios(season, site_position, site_name, sigma_value=30, date_range=None):
-    create_timeseries(season, site_position, site_name)
+    """Run EFAST fusion for all 4 scenarios. Expects prepared_*/s2 and prepared_*/s3 to exist."""
     for strategy in ["aggressive", "nonaggressive"]:
-        prepare_s2(season, site_position, site_name, cleaning_strategy=strategy, date_range=date_range)
-        prepare_s3(season, site_position, site_name, cleaning_strategy=strategy, date_range=date_range)
         run_efast(season, site_position, site_name, cleaning_strategy=strategy, sigma=None, date_range=date_range)
         run_efast(season, site_position, site_name, cleaning_strategy=strategy, sigma=sigma_value, date_range=date_range)
