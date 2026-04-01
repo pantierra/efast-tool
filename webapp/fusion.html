@@ -12,12 +12,16 @@
         .nav a { margin-right: 12px; color: #0066cc; text-decoration: none; }
         .nav a:hover { text-decoration: underline; }
         .nav a.active { font-weight: bold; }
-        .container { max-width: 900px; margin: 0 auto; padding: 20px; }
+        .container { max-width: 1400px; margin: 0 auto; padding: 20px; }
+        .header-sticky { position: sticky; top: 0; background: white; z-index: 1000; border-bottom: 1px solid #ccc; padding-bottom: 20px; margin-bottom: 20px; }
         .selectors { margin-bottom: 20px; }
         .selectors select { padding: 5px 10px; font-size: 14px; margin-right: 15px; }
         h1 { margin: 0 0 5px 0; font-size: 22px; }
         .season-row { padding-bottom: 15px; }
         h2 { margin: 0; font-size: 16px; color: #666; display: inline; }
+        .download-links { margin-left: 10px; font-size: 14px; }
+        .download-links a { margin-right: 8px; color: #0066cc; text-decoration: none; }
+        .download-links a:hover { text-decoration: underline; }
         #dateSlider { width: 100%; margin: 15px 0; }
         #dateDisplay { text-align: center; font-size: 14px; color: #666; }
         .map-label { font-size: 12px; margin-bottom: 3px; color: #666; }
@@ -31,17 +35,18 @@
 </head>
 <body>
     <div class="container">
-        <div class="nav">
-            <a href="index.html">Full</a>
-            <a href="preselection.html">Pre-selection</a>
-            <a href="prepared.html">Prepared</a>
-            <a href="fusion.html" class="active">Fusion</a>
-            <a href="postprocessed.html">Postprocessed</a>
-        </div>
-        <h1 id="siteName">Innsbruck</h1>
-        <div class="season-row"><h2 id="season">2024</h2></div>
-        <div class="selectors">
-            <label>Site:</label>
+        <div class="header-sticky">
+            <div class="nav">
+                <a href="index.html">Full</a>
+                <a href="preselection.html">Pre-selection</a>
+                <a href="prepared.html">Prepared</a>
+                <a href="fusion.html" class="active">Fusion</a>
+                <a href="postprocessed.html">Postprocessed</a>
+            </div>
+            <h1 id="siteName">Innsbruck</h1>
+            <div class="season-row"><h2 id="season">2024</h2><span class="download-links" id="downloadLinks"></span></div>
+            <div class="selectors">
+                <label>Site:</label>
             <select id="siteSelect"></select>
             <label>Season:</label>
             <select id="seasonSelect"></select>
@@ -55,9 +60,10 @@
                 <option value="20">σ=20</option>
                 <option value="30">σ=30</option>
             </select>
+            </div>
+            <input type="range" id="dateSlider" min="0" max="365" value="0">
+            <div id="dateDisplay">2024-01-01</div>
         </div>
-        <input type="range" id="dateSlider" min="0" max="365" value="0">
-        <div id="dateDisplay">2024-01-01</div>
         <div class="map-label">Fusion RGB (closest available)</div>
         <div id="mapDate" class="map-date"></div>
         <div id="fusionMap"></div>
@@ -114,6 +120,7 @@
                 ndviTs = n; gccTs = g; bandsTs = b;
             } catch { ndviTs = []; gccTs = []; bandsTs = []; }
             drawPlots();
+            updateDownloadLinks();
         }
 
         function drawPlot(canvasId, data, key, color) {
@@ -157,6 +164,15 @@
             drawPlot("plot_ndvi", ndviTs, "ndvi", "#2d7a3e");
             drawPlot("plot_gcc", gccTs, "greenness_index", "#00aa00");
             BANDS.forEach(b => drawPlot(`plot_${b.key}`, bandsTs, b.key, b.color));
+        }
+
+        function updateDownloadLinks() {
+            const el = document.getElementById("downloadLinks");
+            if (!el) return;
+            const sub = getFusionTimeseriesDir();
+            const base = `data/${siteName}/${season}/prepared_${strategy}/export/${sub}`;
+            const name = `${siteName}_${season}_fusion_${strategy}_${sub}`;
+            el.innerHTML = `<a href="${base}/timeseries.json" download="${name}.json">[JSON]</a><a href="${base}/timeseries.csv" download="${name}.csv">[CSV]</a>`;
         }
 
         async function findFusionFile(dateStr) {

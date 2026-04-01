@@ -1,5 +1,6 @@
 # Project data
 data/*
+webapp/data
 
 # Environment
 .env

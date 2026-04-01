@@ -459,6 +459,37 @@ def _create_bands_timeseries_for_dir(input_dir, output_dir, site_position, sourc
     print(f"[BANDS-{source_name}] Saved: {output_dir / 'timeseries.json'} ({len(timeseries)} entries)")
 
 
+def _write_export(ndvi_dir, gcc_dir, bands_dir, export_dir):
+    """Merge ndvi, gcc, bands into combined timeseries.json and timeseries.csv."""
+    def load(p):
+        p = Path(p)
+        if not p.exists():
+            return []
+        try:
+            return json.loads((p / "timeseries.json").read_text())
+        except Exception:
+            return []
+    ndvi = {str(t.get("date", ""))[:10]: t for t in load(ndvi_dir)}
+    gcc = {str(t.get("date", ""))[:10]: t for t in load(gcc_dir)}
+    bands = {str(t.get("date", ""))[:10]: t for t in load(bands_dir)}
+    keys = sorted(set(ndvi) | set(gcc) | set(bands))
+    merged = []
+    for k in keys:
+        r = {"date": k, "filename": ""}
+        for d in [ndvi.get(k, {}), gcc.get(k, {}), bands.get(k, {})]:
+            r.update({x: d[x] for x in d if x not in ("date",)})
+        merged.append(r)
+    export_dir.mkdir(parents=True, exist_ok=True)
+    (export_dir / "timeseries.json").write_text(json.dumps(merged, indent=2))
+    cols = ["date", "filename", "ndvi", "greenness_index", "b02", "b03", "b04", "b8a"]
+    def esc(v):
+        s = str(v) if v is not None else ""
+        return f'"{s}"' if "," in s or '"' in s else s
+    rows = [cols] + [[esc(r.get(c)) for c in cols] for r in merged]
+    (export_dir / "timeseries.csv").write_text("\n".join(",".join(x) for x in rows))
+    print(f"[EXPORT] Saved {export_dir / 'timeseries.json'} and timeseries.csv ({len(merged)} entries)")
+
+
 def create_prepared_fusion_timeseries(season, site_position, site_name):
     """Generate NDVI, GCC, and band timeseries for prepared S2/S3 and fusion outputs."""
     for strategy in ["aggressive", "nonaggressive"]:
@@ -469,12 +500,14 @@ def create_prepared_fusion_timeseries(season, site_position, site_name):
                 _create_timeseries_for_dir(inp, base / "ndvi" / source, site_position, f"PREPARED-{source.upper()}-{strategy}", "*.tif")
                 _create_gcc_timeseries_for_dir(inp, base / "gcc" / source, site_position, f"PREPARED-{source.upper()}-{strategy}", "*.tif")
                 _create_bands_timeseries_for_dir(inp, base / "bands" / source, site_position, f"PREPARED-{source.upper()}-{strategy}", "*.tif")
+                _write_export(base / "ndvi" / source, base / "gcc" / source, base / "bands" / source, base / "export" / source)
         for sig, fusion_sub in [(None, "fusion"), (30, "fusion_sigma30")]:
             inp = base / fusion_sub
             if inp.exists():
                 _create_timeseries_for_dir(inp, base / "ndvi" / fusion_sub, site_position, f"FUSION-{strategy}-σ{sig or 20}", "*.tif")
                 _create_gcc_timeseries_for_dir(inp, base / "gcc" / fusion_sub, site_position, f"FUSION-{strategy}-σ{sig or 20}", "*.tif")
                 _create_bands_timeseries_for_dir(inp, base / "bands" / fusion_sub, site_position, f"FUSION-{strategy}-σ{sig or 20}", "*.tif")
+                _write_export(base / "ndvi" / fusion_sub, base / "gcc" / fusion_sub, base / "bands" / fusion_sub, base / "export" / fusion_sub)
 
 
 def create_bands_timeseries_post_process(season, site_position, site_name):
@@ -486,3 +519,4 @@ def create_bands_timeseries_post_process(season, site_position, site_name):
                 inp, out = base / source, base / "bands" / source
                 if inp.exists():
                     _create_bands_timeseries_for_dir(inp, out, site_position, f"POST-{source.upper()}-{strategy}-σ{sigma}", "*.geotiff")
+                    _write_export(base / "ndvi" / source, base / "gcc" / source, base / "bands" / source, base / "export" / source)

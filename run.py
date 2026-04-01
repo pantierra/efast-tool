@@ -17,26 +17,26 @@ def run_pipeline(season, site_position, site_name):
         #download_s3(season, site_position, site_name)
         #download_phenocam(season, site_position, site_name)
 
-        print(f"Creating preselection timeseries: {site_name}, {season}")
-        create_timeseries(season, site_position, site_name)
+        # print(f"Creating preselection timeseries: {site_name}, {season}")
+        # create_timeseries(season, site_position, site_name)
 
-        print(f"Preparing S2 and S3 for fusion: {site_name}, {season}")
-        for strategy in ["aggressive", "nonaggressive"]:
-            prepare_s2(season, site_position, site_name, cleaning_strategy=strategy)
-            prepare_s3(season, site_position, site_name, cleaning_strategy=strategy)
+        # print(f"Preparing S2 and S3 for fusion: {site_name}, {season}")
+        # for strategy in ["aggressive", "nonaggressive"]:
+        #     prepare_s2(season, site_position, site_name, cleaning_strategy=strategy)
+        #     prepare_s3(season, site_position, site_name, cleaning_strategy=strategy)
 
-        print(f"Running EFAST fusion for all scenarios: {site_name}, {season}")
-        run_all_efast_scenarios(season, site_position, site_name)
+        # print(f"Running EFAST fusion for all scenarios: {site_name}, {season}")
+        # run_all_efast_scenarios(season, site_position, site_name)
 
         print(f"Creating prepared/fusion timeseries: {site_name}, {season}")
         create_prepared_fusion_timeseries(season, site_position, site_name)
 
         print(f"Post-processing: {site_name}, {season}")
-        post_process_all_scenarios(season, site_position, site_name)
+        # post_process_all_scenarios(season, site_position, site_name)
         post_process_timeseries(season, site_position, site_name)
         
         print(f"Calculating metrics: {site_name}, {season}")
-        calculate_all_metrics(season, site_name, site_position)
+        # calculate_all_metrics(season, site_name, site_position)
 
     except Exception as e:
         print(f"Error: {e}")
