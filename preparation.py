@@ -1,4 +1,5 @@
 """Data preparation: S2/S3 preprocessing for fusion."""
+
 import json
 import shutil
 from pathlib import Path
@@ -16,6 +17,7 @@ def _import_distance_to_clouds():
     """Lazy import of efast.distance_to_clouds."""
     try:
         from efast.s2_processing import distance_to_clouds
+
         return distance_to_clouds
     except ImportError:
         raise ImportError(
@@ -38,6 +40,76 @@ def _load_excluded(season, site_name, cleaning_strategy):
 
 def _get_base_dir(season, site_name, cleaning_strategy):
     return Path(f"data/{site_name}/{season}/prepared_{cleaning_strategy}/")
+
+
+def _get_itb_base_dir(season, site_name, cleaning_strategy):
+    return Path(f"data/{site_name}/{season}/prepared_{cleaning_strategy}_itb")
+
+
+def _compute_gcc_from_refl_array(blue, green, red):
+    total = red.astype(np.float32) + green.astype(np.float32) + red.astype(np.float32)
+    mask = (total > 0) & np.isfinite(total)
+    gcc = np.zeros_like(green, dtype=np.float32)
+    gcc[mask] = green[mask].astype(np.float32) / total[mask]
+    return gcc
+
+
+def _link_dist_cloud_from_prepared(src_s2_dir, dst_s2_dir):
+    dst_s2_dir.mkdir(parents=True, exist_ok=True)
+    for src in src_s2_dir.glob("*DIST_CLOUD.tif"):
+        dst = dst_s2_dir / src.name
+        if dst.exists():
+            continue
+        try:
+            dst.symlink_to(src.resolve())
+        except OSError:
+            shutil.copy2(src, dst)
+
+
+def prepare_s2_gcc_for_itb(
+    season, site_position, site_name, cleaning_strategy="aggressive"
+):
+    base = _get_base_dir(season, site_name, cleaning_strategy)
+    itb_s2 = _get_itb_base_dir(season, site_name, cleaning_strategy) / "s2"
+    s2_prep = base / "s2"
+    itb_s2.mkdir(parents=True, exist_ok=True)
+    for refl in sorted(s2_prep.glob("*REFL.tif")):
+        out = itb_s2 / refl.name.replace("_REFL.tif", "_GCC.tif")
+        if out.exists():
+            continue
+        with rasterio.open(refl) as src:
+            if src.count < 4:
+                continue
+            b, g, r = (src.read(i).astype(np.float32) for i in range(1, 4))
+            gcc = _compute_gcc_from_refl_array(b, g, r)
+            profile = src.profile.copy()
+            profile.update({"count": 1, "dtype": "float32", "nodata": 0})
+            with rasterio.open(out, "w", **profile) as dst:
+                dst.write(gcc, 1)
+        print(f"[S2-ITB] Saved {out.name}")
+    _link_dist_cloud_from_prepared(s2_prep, itb_s2)
+
+
+def prepare_s3_gcc_for_itb(
+    season, site_position, site_name, cleaning_strategy="aggressive"
+):
+    base = _get_base_dir(season, site_name, cleaning_strategy)
+    itb_s3 = _get_itb_base_dir(season, site_name, cleaning_strategy) / "s3"
+    itb_s3.mkdir(parents=True, exist_ok=True)
+    for comp in sorted((base / "s3").glob("composite_*.tif")):
+        out = itb_s3 / comp.name
+        if out.exists():
+            continue
+        with rasterio.open(comp) as src:
+            if src.count < 4:
+                continue
+            b, g, r = (src.read(i).astype(np.float32) for i in range(1, 4))
+            gcc = _compute_gcc_from_refl_array(b, g, r)
+            profile = src.profile.copy()
+            profile.update({"count": 1, "dtype": "float32", "nodata": 0})
+            with rasterio.open(out, "w", **profile) as dst:
+                dst.write(gcc, 1)
+        print(f"[S3-ITB] Saved {out.name}")
 
 
 def _reproject_raster_to_target(
@@ -90,7 +162,9 @@ def _rescale_dist_cloud_for_small_roi(s2_output_dir):
             print(f"[S2-PREP] Rescaled DIST_CLOUD for {dc_path.name} (max was {d_max})")
 
 
-def prepare_s2(season, site_position, site_name, cleaning_strategy="aggressive", date_range=None):
+def prepare_s2(
+    season, site_position, site_name, cleaning_strategy="aggressive", date_range=None
+):
     lat, lon = site_position
     s2_dir = Path(f"data/{site_name}/{season}/raw/s2/")
     s3_dir = Path(f"data/{site_name}/{season}/raw/s3/")
@@ -99,7 +173,9 @@ def prepare_s2(season, site_position, site_name, cleaning_strategy="aggressive",
     clouds = _load_excluded(season, site_name, cleaning_strategy)
     s2_output_dir.mkdir(parents=True, exist_ok=True)
 
-    print(f"[S2-PREP] Starting preparation: {site_name} ({lat:.6f}, {lon:.6f}), {season}, strategy={cleaning_strategy}")
+    print(
+        f"[S2-PREP] Starting preparation: {site_name} ({lat:.6f}, {lon:.6f}), {season}, strategy={cleaning_strategy}"
+    )
 
     s3_files = [f for f in s3_dir.glob("*.geotiff") if f.name not in clouds["s3"]]
     if not s3_files:
@@ -113,7 +189,9 @@ def prepare_s2(season, site_position, site_name, cleaning_strategy="aggressive",
 
     for s2_file in sorted(s2_dir.glob("*.geotiff")):
         if s2_file.name in clouds["s2"]:
-            print(f"[S2-PREP] Skipping {s2_file.name} (excluded by {cleaning_strategy})")
+            print(
+                f"[S2-PREP] Skipping {s2_file.name} (excluded by {cleaning_strategy})"
+            )
             continue
         date_str = s2_file.name.split("_")[0]
         refl_dst = s2_output_dir / f"S2A_MSIL2A_{date_str}_REFL.tif"
@@ -136,14 +214,16 @@ def prepare_s2(season, site_position, site_name, cleaning_strategy="aggressive",
         temp_normalized.unlink()
         print(f"[S2-PREP] Saved: {refl_dst}")
 
-    print(f"[S2-PREP] Computing distance-to-clouds...")
+    print("[S2-PREP] Computing distance-to-clouds...")
     distance_to_clouds = _import_distance_to_clouds()
     distance_to_clouds(s2_output_dir, ratio=RESOLUTION_RATIO)
     _rescale_dist_cloud_for_small_roi(s2_output_dir)
     print("[S2-PREP] Completed")
 
 
-def prepare_s3(season, site_position, site_name, cleaning_strategy="aggressive", date_range=None):
+def prepare_s3(
+    season, site_position, site_name, cleaning_strategy="aggressive", date_range=None
+):
     lat, lon = site_position
     s3_dir = Path(f"data/{site_name}/{season}/raw/s3/")
     base_dir = _get_base_dir(season, site_name, cleaning_strategy)
@@ -153,16 +233,22 @@ def prepare_s3(season, site_position, site_name, cleaning_strategy="aggressive",
     clouds = _load_excluded(season, site_name, cleaning_strategy)
     s3_preprocessed_dir.mkdir(parents=True, exist_ok=True)
 
-    print(f"[S3-PREP] Starting preparation: {site_name} ({lat:.6f}, {lon:.6f}), {season}, strategy={cleaning_strategy}")
+    print(
+        f"[S3-PREP] Starting preparation: {site_name} ({lat:.6f}, {lon:.6f}), {season}, strategy={cleaning_strategy}"
+    )
 
     s3_by_date = defaultdict(list)
     for s3_file in s3_dir.glob("*.geotiff"):
         if s3_file.name not in clouds["s3"]:
             s3_by_date[s3_file.name.split("_")[0]].append(s3_file)
         else:
-            print(f"[S3-PREP] Skipping {s3_file.name} (excluded by {cleaning_strategy})")
+            print(
+                f"[S3-PREP] Skipping {s3_file.name} (excluded by {cleaning_strategy})"
+            )
 
-    print(f"[S3-PREP] Found {sum(len(v) for v in s3_by_date.values())} acquisitions across {len(s3_by_date)} dates")
+    print(
+        f"[S3-PREP] Found {sum(len(v) for v in s3_by_date.values())} acquisitions across {len(s3_by_date)} dates"
+    )
 
     temp_composite_dir = s3_preprocessed_dir / "temp_composites"
     if temp_composite_dir.exists():
@@ -187,7 +273,9 @@ def prepare_s3(season, site_position, site_name, cleaning_strategy="aggressive",
                 profile.update({"count": composite.shape[0], "dtype": "float32"})
             with rasterio.open(composite_path, "w", **profile) as dst:
                 dst.write(composite)
-            print(f"[S3-PREP] Composite {date_str}: {len(s3_files)} acquisitions merged")
+            print(
+                f"[S3-PREP] Composite {date_str}: {len(s3_files)} acquisitions merged"
+            )
 
     # Reproject S3 to match S2 REFL bounds (full coverage) instead of DIST_CLOUD bounds
     # This ensures fusion covers the same area as S2 and dimensions match
@@ -212,7 +300,9 @@ def prepare_s3(season, site_position, site_name, cleaning_strategy="aggressive",
             height,
         )
 
-    print(f"[S3-PREP] Reprojecting {len(list(temp_composite_dir.glob('*.tif')))} composites to S2 grid ({width}×{height} px)...")
+    print(
+        f"[S3-PREP] Reprojecting {len(list(temp_composite_dir.glob('*.tif')))} composites to S2 grid ({width}×{height} px)..."
+    )
 
     # Reproject each S3 composite to match S2 REFL bounds
     sen3_paths = sorted(temp_composite_dir.glob("*.tif"))

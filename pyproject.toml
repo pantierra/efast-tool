@@ -1,0 +1,2 @@
+[tool.ruff.lint.per-file-ignores]
+"run.py" = ["F401"]

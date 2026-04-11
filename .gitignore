@@ -42,3 +42,7 @@ dist/
 # OS
 .DS_Store
 Thumbs.db
+
+AGENTS.md
+METHODOLOGY.md
+.vibe

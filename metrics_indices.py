@@ -1,4 +1,5 @@
 """Index generation: NDVI and GCC from S2/S3/fusion GeoTIFFs."""
+
 import json
 import numpy as np
 import rasterio
@@ -67,7 +68,9 @@ def _get_ndvi_value(ndvi_file, site_position):
     return None
 
 
-def _create_timeseries_for_dir(input_dir, output_dir, site_position, source_name, pattern="*.geotiff"):
+def _create_timeseries_for_dir(
+    input_dir, output_dir, site_position, source_name, pattern="*.geotiff"
+):
     print(f"[NDVI-{source_name}] Creating timeseries.json...")
     timeseries = []
 
@@ -196,13 +199,23 @@ def create_ndvi_timeseries_post_process(season, site_position, site_name):
             processed_dir = f"processed_{strategy}_sigma{sigma}"
             for source in ["s2", "s3"]:
                 input_dir = Path(f"data/{site_name}/{season}/{processed_dir}/{source}/")
-                output_dir = Path(f"data/{site_name}/{season}/{processed_dir}/ndvi/{source}/")
+                output_dir = Path(
+                    f"data/{site_name}/{season}/{processed_dir}/ndvi/{source}/"
+                )
                 _create_timeseries_for_dir(
-                    input_dir, output_dir, site_position, f"POST-PROCESS-{source.upper()}-{strategy}-σ{sigma}"
+                    input_dir,
+                    output_dir,
+                    site_position,
+                    f"POST-PROCESS-{source.upper()}-{strategy}-σ{sigma}",
                 )
             input_dir = Path(f"data/{site_name}/{season}/{processed_dir}/fusion/")
             output_dir = Path(f"data/{site_name}/{season}/{processed_dir}/ndvi/fusion/")
-            _create_timeseries_for_dir(input_dir, output_dir, site_position, f"POST-PROCESS-FUSION-{strategy}-σ{sigma}")
+            _create_timeseries_for_dir(
+                input_dir,
+                output_dir,
+                site_position,
+                f"POST-PROCESS-FUSION-{strategy}-σ{sigma}",
+            )
 
 
 def _calculate_and_write_gcc(input_file, output_file):
@@ -261,6 +274,25 @@ def _get_gcc_from_original(input_file, site_position):
     """Calculate GCC directly from original file without creating GeoTIFF."""
     try:
         with rasterio.open(input_file) as src:
+            if src.count == 1:
+                g = src.read(1).astype(np.float32)
+                lon, lat = site_position[1], site_position[0]
+                x, y = transform_coords("EPSG:4326", src.crs, [lon], [lat])
+                if not (
+                    src.bounds.left <= x[0] <= src.bounds.right
+                    and src.bounds.bottom <= y[0] <= src.bounds.top
+                ):
+                    return None
+                row, col = src.index(x[0], y[0])
+                if row < 0 or row >= src.height or col < 0 or col >= src.width:
+                    return None
+                r0, r1 = max(0, row - 1), min(src.height, row + 2)
+                c0, c1 = max(0, col - 1), min(src.width, col + 2)
+                win = g[r0:r1, c0:c1]
+                mask = np.isfinite(win) & (win > 0)
+                if not np.any(mask):
+                    return None
+                return float(np.mean(win[mask]))
             if src.count < 3:
                 return None
 
@@ -290,11 +322,21 @@ def _get_gcc_from_original(input_file, site_position):
 
             # Calculate GCC for each pixel in window
             total = red_window + green_window + blue_window
-            mask = (total > 0) & ~np.isnan(total) & (blue_window >= 0) & (green_window >= 0) & (red_window >= 0)
+            mask = (
+                (total > 0)
+                & ~np.isnan(total)
+                & (blue_window >= 0)
+                & (green_window >= 0)
+                & (red_window >= 0)
+            )
             if not np.any(mask):
-                negative_pixels = np.sum((blue_window < 0) | (green_window < 0) | (red_window < 0))
+                negative_pixels = np.sum(
+                    (blue_window < 0) | (green_window < 0) | (red_window < 0)
+                )
                 if negative_pixels > 0:
-                    print(f"Warning: {input_file.name} excluded - all pixels have negative band values ({negative_pixels} negative pixels in window)")
+                    print(
+                        f"Warning: {input_file.name} excluded - all pixels have negative band values ({negative_pixels} negative pixels in window)"
+                    )
                 return None
 
             gcc_window = np.zeros_like(green_window, dtype=np.float32)
@@ -303,11 +345,13 @@ def _get_gcc_from_original(input_file, site_position):
             # Return mean of valid GCC values
             valid_gcc = gcc_window[mask]
             return float(np.mean(valid_gcc)) if len(valid_gcc) > 0 else None
-    except Exception as e:
+    except Exception:
         return None
 
 
-def _create_gcc_timeseries_for_dir(input_dir, output_dir, site_position, source_name, pattern="*.geotiff"):
+def _create_gcc_timeseries_for_dir(
+    input_dir, output_dir, site_position, source_name, pattern="*.geotiff"
+):
     print(f"[GCC-{source_name}] Creating timeseries.json...")
     timeseries = []
 
@@ -342,7 +386,9 @@ def _create_gcc_timeseries_for_dir(input_dir, output_dir, site_position, source_
                 f"[GCC-{source_name}] Warning: Could not sample {filename} (outside bounds or nodata)"
             )
 
-        timeseries.append({"date": date, "filename": filename, "greenness_index": gcc_value})
+        timeseries.append(
+            {"date": date, "filename": filename, "greenness_index": gcc_value}
+        )
 
     timeseries.sort(key=lambda x: x["date"])
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -400,13 +446,41 @@ def create_gcc_timeseries_post_process(season, site_position, site_name):
             processed_dir = f"processed_{strategy}_sigma{sigma}"
             for source in ["s2", "s3"]:
                 input_dir = Path(f"data/{site_name}/{season}/{processed_dir}/{source}/")
-                output_dir = Path(f"data/{site_name}/{season}/{processed_dir}/gcc/{source}/")
+                output_dir = Path(
+                    f"data/{site_name}/{season}/{processed_dir}/gcc/{source}/"
+                )
                 _create_gcc_timeseries_for_dir(
-                    input_dir, output_dir, site_position, f"POST-PROCESS-{source.upper()}-{strategy}-σ{sigma}"
+                    input_dir,
+                    output_dir,
+                    site_position,
+                    f"POST-PROCESS-{source.upper()}-{strategy}-σ{sigma}",
                 )
             input_dir = Path(f"data/{site_name}/{season}/{processed_dir}/fusion/")
             output_dir = Path(f"data/{site_name}/{season}/{processed_dir}/gcc/fusion/")
-            _create_gcc_timeseries_for_dir(input_dir, output_dir, site_position, f"POST-PROCESS-FUSION-{strategy}-σ{sigma}")
+            _create_gcc_timeseries_for_dir(
+                input_dir,
+                output_dir,
+                site_position,
+                f"POST-PROCESS-FUSION-{strategy}-σ{sigma}",
+            )
+            itb_dir = f"processed_{strategy}_itb_sigma{sigma}"
+            base_itb = Path(f"data/{site_name}/{season}/{itb_dir}")
+            if not base_itb.exists():
+                continue
+            for source in ["s2", "s3"]:
+                inp, out = base_itb / source, base_itb / "gcc" / source
+                _create_gcc_timeseries_for_dir(
+                    inp,
+                    out,
+                    site_position,
+                    f"POST-ITB-{source.upper()}-{strategy}-σ{sigma}",
+                )
+            _create_gcc_timeseries_for_dir(
+                base_itb / "fusion",
+                base_itb / "gcc" / "fusion",
+                site_position,
+                f"POST-ITB-FUSION-{strategy}-σ{sigma}",
+            )
 
 
 def _get_bands_from_original(input_file, site_position):
@@ -425,7 +499,10 @@ def _get_bands_from_original(input_file, site_position):
             row, col = src.index(x[0], y[0])
             r0, r1 = max(0, row - 1), min(src.height, row + 2)
             c0, c1 = max(0, col - 1), min(src.width, col + 2)
-            bands = [src.read(i + 1, window=((r0, r1), (c0, c1))).astype(np.float32) for i in range(4)]
+            bands = [
+                src.read(i + 1, window=((r0, r1), (c0, c1))).astype(np.float32)
+                for i in range(4)
+            ]
             mask = ~np.any([np.isnan(b) for b in bands], axis=0)
             mask &= np.all([b > 0 for b in bands], axis=0)
             if not np.any(mask):
@@ -440,7 +517,9 @@ def _get_bands_from_original(input_file, site_position):
         return None
 
 
-def _create_bands_timeseries_for_dir(input_dir, output_dir, site_position, source_name, pattern="*.geotiff"):
+def _create_bands_timeseries_for_dir(
+    input_dir, output_dir, site_position, source_name, pattern="*.geotiff"
+):
     print(f"[BANDS-{source_name}] Creating timeseries.json...")
     timeseries = []
     for f in sorted(input_dir.glob(pattern)):
@@ -456,11 +535,14 @@ def _create_bands_timeseries_for_dir(input_dir, output_dir, site_position, sourc
     timeseries.sort(key=lambda x: x["date"])
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "timeseries.json").write_text(json.dumps(timeseries, indent=2))
-    print(f"[BANDS-{source_name}] Saved: {output_dir / 'timeseries.json'} ({len(timeseries)} entries)")
+    print(
+        f"[BANDS-{source_name}] Saved: {output_dir / 'timeseries.json'} ({len(timeseries)} entries)"
+    )
 
 
 def _write_export(ndvi_dir, gcc_dir, bands_dir, export_dir):
     """Merge ndvi, gcc, bands into combined timeseries.json and timeseries.csv."""
+
     def load(p):
         p = Path(p)
         if not p.exists():
@@ -469,6 +551,7 @@ def _write_export(ndvi_dir, gcc_dir, bands_dir, export_dir):
             return json.loads((p / "timeseries.json").read_text())
         except Exception:
             return []
+
     ndvi = {str(t.get("date", ""))[:10]: t for t in load(ndvi_dir)}
     gcc = {str(t.get("date", ""))[:10]: t for t in load(gcc_dir)}
     bands = {str(t.get("date", ""))[:10]: t for t in load(bands_dir)}
@@ -482,12 +565,16 @@ def _write_export(ndvi_dir, gcc_dir, bands_dir, export_dir):
     export_dir.mkdir(parents=True, exist_ok=True)
     (export_dir / "timeseries.json").write_text(json.dumps(merged, indent=2))
     cols = ["date", "filename", "ndvi", "greenness_index", "b02", "b03", "b04", "b8a"]
+
     def esc(v):
         s = str(v) if v is not None else ""
         return f'"{s}"' if "," in s or '"' in s else s
+
     rows = [cols] + [[esc(r.get(c)) for c in cols] for r in merged]
     (export_dir / "timeseries.csv").write_text("\n".join(",".join(x) for x in rows))
-    print(f"[EXPORT] Saved {export_dir / 'timeseries.json'} and timeseries.csv ({len(merged)} entries)")
+    print(
+        f"[EXPORT] Saved {export_dir / 'timeseries.json'} and timeseries.csv ({len(merged)} entries)"
+    )
 
 
 def create_prepared_fusion_timeseries(season, site_position, site_name):
@@ -497,17 +584,86 @@ def create_prepared_fusion_timeseries(season, site_position, site_name):
         for source in ["s2", "s3"]:
             inp = base / source
             if inp.exists():
-                _create_timeseries_for_dir(inp, base / "ndvi" / source, site_position, f"PREPARED-{source.upper()}-{strategy}", "*.tif")
-                _create_gcc_timeseries_for_dir(inp, base / "gcc" / source, site_position, f"PREPARED-{source.upper()}-{strategy}", "*.tif")
-                _create_bands_timeseries_for_dir(inp, base / "bands" / source, site_position, f"PREPARED-{source.upper()}-{strategy}", "*.tif")
-                _write_export(base / "ndvi" / source, base / "gcc" / source, base / "bands" / source, base / "export" / source)
+                _create_timeseries_for_dir(
+                    inp,
+                    base / "ndvi" / source,
+                    site_position,
+                    f"PREPARED-{source.upper()}-{strategy}",
+                    "*.tif",
+                )
+                _create_gcc_timeseries_for_dir(
+                    inp,
+                    base / "gcc" / source,
+                    site_position,
+                    f"PREPARED-{source.upper()}-{strategy}",
+                    "*.tif",
+                )
+                _create_bands_timeseries_for_dir(
+                    inp,
+                    base / "bands" / source,
+                    site_position,
+                    f"PREPARED-{source.upper()}-{strategy}",
+                    "*.tif",
+                )
+                _write_export(
+                    base / "ndvi" / source,
+                    base / "gcc" / source,
+                    base / "bands" / source,
+                    base / "export" / source,
+                )
         for sig, fusion_sub in [(None, "fusion"), (30, "fusion_sigma30")]:
             inp = base / fusion_sub
             if inp.exists():
-                _create_timeseries_for_dir(inp, base / "ndvi" / fusion_sub, site_position, f"FUSION-{strategy}-σ{sig or 20}", "*.tif")
-                _create_gcc_timeseries_for_dir(inp, base / "gcc" / fusion_sub, site_position, f"FUSION-{strategy}-σ{sig or 20}", "*.tif")
-                _create_bands_timeseries_for_dir(inp, base / "bands" / fusion_sub, site_position, f"FUSION-{strategy}-σ{sig or 20}", "*.tif")
-                _write_export(base / "ndvi" / fusion_sub, base / "gcc" / fusion_sub, base / "bands" / fusion_sub, base / "export" / fusion_sub)
+                _create_timeseries_for_dir(
+                    inp,
+                    base / "ndvi" / fusion_sub,
+                    site_position,
+                    f"FUSION-{strategy}-σ{sig or 20}",
+                    "*.tif",
+                )
+                _create_gcc_timeseries_for_dir(
+                    inp,
+                    base / "gcc" / fusion_sub,
+                    site_position,
+                    f"FUSION-{strategy}-σ{sig or 20}",
+                    "*.tif",
+                )
+                _create_bands_timeseries_for_dir(
+                    inp,
+                    base / "bands" / fusion_sub,
+                    site_position,
+                    f"FUSION-{strategy}-σ{sig or 20}",
+                    "*.tif",
+                )
+                _write_export(
+                    base / "ndvi" / fusion_sub,
+                    base / "gcc" / fusion_sub,
+                    base / "bands" / fusion_sub,
+                    base / "export" / fusion_sub,
+                )
+        itb = Path(f"data/{site_name}/{season}/prepared_{strategy}_itb")
+        if not itb.exists():
+            continue
+        for source in ["s2", "s3"]:
+            inp = itb / source
+            if inp.exists():
+                _create_gcc_timeseries_for_dir(
+                    inp,
+                    itb / "gcc" / source,
+                    site_position,
+                    f"PREPARED-ITB-{source.upper()}-{strategy}",
+                    "*.tif",
+                )
+        for sig, fusion_sub in [(None, "fusion"), (30, "fusion_sigma30")]:
+            inp = itb / fusion_sub
+            if inp.exists():
+                _create_gcc_timeseries_for_dir(
+                    inp,
+                    itb / "gcc" / fusion_sub,
+                    site_position,
+                    f"FUSION-ITB-{strategy}-σ{sig or 20}",
+                    "*.tif",
+                )
 
 
 def create_bands_timeseries_post_process(season, site_position, site_name):
@@ -518,5 +674,16 @@ def create_bands_timeseries_post_process(season, site_position, site_name):
             for source in ["s2", "s3", "fusion"]:
                 inp, out = base / source, base / "bands" / source
                 if inp.exists():
-                    _create_bands_timeseries_for_dir(inp, out, site_position, f"POST-{source.upper()}-{strategy}-σ{sigma}", "*.geotiff")
-                    _write_export(base / "ndvi" / source, base / "gcc" / source, base / "bands" / source, base / "export" / source)
+                    _create_bands_timeseries_for_dir(
+                        inp,
+                        out,
+                        site_position,
+                        f"POST-{source.upper()}-{strategy}-σ{sigma}",
+                        "*.geotiff",
+                    )
+                    _write_export(
+                        base / "ndvi" / source,
+                        base / "gcc" / source,
+                        base / "bands" / source,
+                        base / "export" / source,
+                    )

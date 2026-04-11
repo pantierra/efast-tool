@@ -1,4 +1,5 @@
 """Metrics and statistics: temporal/spatial metrics and PhenoCam stats."""
+
 import json
 import numpy as np
 from pathlib import Path
@@ -132,6 +133,31 @@ def _get_spatial_stats_from_raster(raster_file, site_position):
     """Extract spatial statistics (mean, std, min, max) from GCC raster in 3x3 window."""
     try:
         with rasterio.open(raster_file) as src:
+            if src.count == 1:
+                g = src.read(1).astype(np.float32)
+                lon, lat = site_position[1], site_position[0]
+                x, y = transform_coords("EPSG:4326", src.crs, [lon], [lat])
+                if not (
+                    src.bounds.left <= x[0] <= src.bounds.right
+                    and src.bounds.bottom <= y[0] <= src.bounds.top
+                ):
+                    return None
+                row, col = src.index(x[0], y[0])
+                if row < 0 or row >= src.height or col < 0 or col >= src.width:
+                    return None
+                r0, r1 = max(0, row - 1), min(src.height, row + 2)
+                c0, c1 = max(0, col - 1), min(src.width, col + 2)
+                win = g[r0:r1, c0:c1]
+                mask = np.isfinite(win) & (win > 0)
+                if not np.any(mask):
+                    return None
+                valid = win[mask]
+                return {
+                    "mean": float(np.mean(valid)),
+                    "std": float(np.std(valid)),
+                    "min": float(np.min(valid)),
+                    "max": float(np.max(valid)),
+                }
             if src.count < 3:
                 return None
 
@@ -161,7 +187,13 @@ def _get_spatial_stats_from_raster(raster_file, site_position):
 
             # Calculate GCC for each pixel in window
             total = red_window + green_window + blue_window
-            mask = (total > 0) & ~np.isnan(total) & (blue_window >= 0) & (green_window >= 0) & (red_window >= 0)
+            mask = (
+                (total > 0)
+                & ~np.isnan(total)
+                & (blue_window >= 0)
+                & (green_window >= 0)
+                & (red_window >= 0)
+            )
             if not np.any(mask):
                 return None
 
@@ -259,7 +291,9 @@ def calculate_scenario_metrics(season, site_name, strategy, sigma, site_position
 
     # Calculate spatial metrics
     fusion_raster_dir = base / processed_dir / "fusion"
-    spatial_metrics = calculate_spatial_metrics(fusion_raster_dir, phenocam_ts, site_position)
+    spatial_metrics = calculate_spatial_metrics(
+        fusion_raster_dir, phenocam_ts, site_position
+    )
 
     return temporal_metrics, spatial_metrics
 
@@ -283,7 +317,9 @@ def calculate_all_metrics(season, site_name, site_position):
         results["phenocam_stats"] = phenocam_stats
 
     # Calculate S2 baseline metrics once (S2 data is identical across scenarios)
-    s2_ts_path = base / "processed_aggressive_sigma20" / "gcc" / "s2" / "timeseries.json"
+    s2_ts_path = (
+        base / "processed_aggressive_sigma20" / "gcc" / "s2" / "timeseries.json"
+    )
     s2_ts = load_timeseries(s2_ts_path)
     if s2_ts:
         s2_metrics = calculate_temporal_metrics(s2_ts, phenocam_ts)
@@ -303,7 +339,9 @@ def calculate_all_metrics(season, site_name, site_position):
             fusion_ts = load_timeseries(fusion_ts_path)
 
             if not fusion_ts:
-                print(f"[METRICS] Warning: Missing fusion data for {scenario_name}, skipping")
+                print(
+                    f"[METRICS] Warning: Missing fusion data for {scenario_name}, skipping"
+                )
                 continue
 
             # Calculate temporal metrics
@@ -313,7 +351,30 @@ def calculate_all_metrics(season, site_name, site_position):
 
             # Calculate spatial metrics
             fusion_raster_dir = base / processed_dir / "fusion"
-            spatial_metrics = calculate_spatial_metrics(fusion_raster_dir, phenocam_ts, site_position)
+            spatial_metrics = calculate_spatial_metrics(
+                fusion_raster_dir, phenocam_ts, site_position
+            )
+            if spatial_metrics:
+                results["spatial"][scenario_name] = spatial_metrics
+
+    for strategy in ["aggressive", "nonaggressive"]:
+        for sigma in [20, 30]:
+            scenario_name = f"{strategy}_sigma{sigma}_itb"
+            processed_dir = f"processed_{strategy}_itb_sigma{sigma}"
+            fusion_ts_path = base / processed_dir / "gcc" / "fusion" / "timeseries.json"
+            fusion_ts = load_timeseries(fusion_ts_path)
+            if not fusion_ts:
+                print(
+                    f"[METRICS] Warning: Missing ItB fusion data for {scenario_name}, skipping"
+                )
+                continue
+            temporal_metrics = calculate_temporal_metrics(fusion_ts, phenocam_ts)
+            if temporal_metrics:
+                results["temporal"][scenario_name] = temporal_metrics
+            fusion_raster_dir = base / processed_dir / "fusion"
+            spatial_metrics = calculate_spatial_metrics(
+                fusion_raster_dir, phenocam_ts, site_position
+            )
             if spatial_metrics:
                 results["spatial"][scenario_name] = spatial_metrics
 
@@ -321,14 +382,18 @@ def calculate_all_metrics(season, site_name, site_position):
     if results["temporal"]:
         best_temporal = max(
             results["temporal"].items(),
-            key=lambda x: x[1].get("r_squared", -1) if x[1].get("r_squared") is not None else -1
+            key=lambda x: x[1].get("r_squared", -1)
+            if x[1].get("r_squared") is not None
+            else -1,
         )
         results["summary"] = {"best_temporal_scenario": best_temporal[0]}
 
     if results["spatial"]:
         best_spatial = max(
             results["spatial"].items(),
-            key=lambda x: x[1].get("r_squared", -1) if x[1].get("r_squared") is not None else -1
+            key=lambda x: x[1].get("r_squared", -1)
+            if x[1].get("r_squared") is not None
+            else -1,
         )
         if "summary" not in results:
             results["summary"] = {}
