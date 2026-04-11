@@ -11,6 +11,38 @@ from rasterio.vrt import WarpedVRT
 from rasterio import shutil as rio_shutil
 
 RESOLUTION_RATIO = 21
+# Centred temporal MA on S3 LR stack (METHODOLOGY §5.4.3); odd ≥3, or 1 to disable.
+S3_MOVING_AVERAGE_WINDOW_DAYS = 5
+
+
+def _apply_s3_temporal_moving_average(s3_dir, window):
+    """In-place smoothing of composite_*.tif along calendar order; nodata 0 → NaN for averaging."""
+    if window <= 1:
+        return
+    paths = sorted(s3_dir.glob("composite_*.tif"), key=lambda p: p.stem.split("_")[1])
+    if not paths:
+        return
+    k = (window - 1) // 2
+    arrs = []
+    profiles = []
+    for p in paths:
+        with rasterio.open(p) as src:
+            d = src.read().astype(np.float32)
+            d[d == 0] = np.nan
+            arrs.append(d)
+            profiles.append(src.profile.copy())
+    stack = np.stack(arrs, axis=0)
+    t, _, _, _ = stack.shape
+    out = np.empty_like(stack)
+    for i in range(t):
+        lo, hi = max(0, i - k), min(t, i + k + 1)
+        out[i] = np.nanmean(stack[lo:hi], axis=0)
+    out = np.nan_to_num(out, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32)
+    for p, prof, slc in zip(paths, profiles, out):
+        prof.update({"dtype": "float32", "nodata": 0})
+        with rasterio.open(p, "w", **prof) as dst:
+            dst.write(slc)
+    print(f"[S3-PREP] Applied {window}-day centred MA ({t} composites)")
 
 
 def _import_distance_to_clouds():
@@ -323,5 +355,8 @@ def prepare_s3(
                 rio_shutil.copy(vrt, outfile, **profile)
         print(f"[S3-PREP] Saved: {outfile}")
 
+    _apply_s3_temporal_moving_average(
+        s3_preprocessed_dir, S3_MOVING_AVERAGE_WINDOW_DAYS
+    )
     shutil.rmtree(temp_composite_dir)
     print("[S3-PREP] Completed")
