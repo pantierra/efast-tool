@@ -5,6 +5,7 @@
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/geotiff@2.0.7/dist-browser/geotiff.js"></script>
+    <script src="common.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/proj4@2.9.0/dist/proj4.js"></script>
     <style>
         body { margin: 0; font-family: sans-serif; }
@@ -42,6 +43,7 @@
                 <a href="prepared.html" class="active">Prepared</a>
                 <a href="fusion.html">Fusion</a>
                 <a href="postprocessed.html">Postprocessed</a>
+                <a href="metrics.html">Metrics</a>
             </div>
             <h1 id="siteName">Innsbruck</h1>
             <div class="season-row"><h2 id="season">2024</h2><span class="download-links" id="downloadLinks"></span></div>
@@ -57,8 +59,13 @@
             </select>
             <label>Source:</label>
             <select id="sourceSelect">
-                <option value="s2">S2 REFL</option>
-                <option value="s3">S3 Composite</option>
+                <option value="s2">S2</option>
+                <option value="s3">S3</option>
+            </select>
+            <label>Mode:</label>
+            <select id="fusionModeSelect" title="BtI = REFL/composite; ItB = GCC rasters">
+                <option value="bti">BtI</option>
+                <option value="itb">ItB</option>
             </select>
             </div>
             <input type="range" id="dateSlider" min="0" max="365" value="0">
@@ -81,7 +88,7 @@
         proj4.defs("EPSG:4326", "+proj=longlat +datum=WGS84 +no_defs");
 
         let siteName = "innsbruck", season = "2024";
-        let strategy = "aggressive", source = "s2";
+        let strategy = "aggressive", source = "s2", fusionMode = "bti";
         let sitePosition = [47.116171, 11.320308];
         let start = new Date(2024, 0, 1);
         let availableSiteSeasons = {};
@@ -99,7 +106,8 @@
         };
 
         function getPreparedPath() {
-            return `data/${siteName}/${season}/prepared_${strategy}`;
+            const mid = fusionMode === "itb" ? `prepared_${strategy}_itb` : `prepared_${strategy}`;
+            return `data/${siteName}/${season}/${mid}`;
         }
 
         async function loadTimeseries() {
@@ -161,7 +169,12 @@
         function updateDownloadLinks() {
             const el = document.getElementById("downloadLinks");
             if (!el) return;
-            const base = `data/${siteName}/${season}/prepared_${strategy}/export/${source}`;
+            const root = getPreparedPath();
+            if (fusionMode === "itb") {
+                el.innerHTML = `<a href="${root}/gcc/${source}/timeseries.json">[GCC JSON]</a>`;
+                return;
+            }
+            const base = `${root}/export/${source}`;
             const name = `${siteName}_${season}_prepared_${strategy}_${source}`;
             el.innerHTML = `<a href="${base}/timeseries.json" download="${name}.json">[JSON]</a><a href="${base}/timeseries.csv" download="${name}.csv">[CSV]</a>`;
         }
@@ -176,7 +189,12 @@
                     const d = new Date(target.getTime() + dir * offset * 86400000);
                     if (d.getTime() < seasonStart || d.getTime() > seasonEnd) continue;
                     const ds = d.toISOString().split("T")[0].replace(/-/g, "");
-                    const filename = source === "s2" ? `S2A_MSIL2A_${ds}_REFL.tif` : `composite_${ds}.tif`;
+                    const filename =
+                        source === "s2"
+                            ? fusionMode === "itb"
+                                ? `S2A_MSIL2A_${ds}_GCC.tif`
+                                : `S2A_MSIL2A_${ds}_REFL.tif`
+                            : `composite_${ds}.tif`;
                     try {
                         const res = await fetch(`${getPreparedPath()}/${source}/${filename}`, { method: "HEAD" });
                         if (res.ok) return filename;
@@ -194,33 +212,12 @@
 
         async function loadGeotiff(filename) {
             const path = `${getPreparedPath()}/${source}/${filename}`;
-            const tiff = await GeoTIFF.fromArrayBuffer(await (await fetch(path)).arrayBuffer());
-            const image = await tiff.getImage();
-            const rasters = await image.readRasters();
-            const width = image.getWidth(), height = image.getHeight();
-            const bbox = image.getBoundingBox();
-            const geoKeys = image.getGeoKeys();
-            const crsCode = geoKeys.ProjectedCSTypeGeoKey ? `EPSG:${geoKeys.ProjectedCSTypeGeoKey}` :
-                (geoKeys.GeographicTypeGeoKey !== 4326 ? `EPSG:${geoKeys.GeographicTypeGeoKey}` : "EPSG:4326");
-            const [blue, green, red] = [0, 1, 2].map(i => Array.from(rasters[i]));
-            const normalize = (arr) => {
-                let min = Infinity, max = -Infinity;
-                for (const v of arr) if (!isNaN(v) && v > 0) { min = Math.min(min, v); max = Math.max(max, v); }
-                return arr.map(v => Math.max(0, Math.min(255, ((v - min) / (max - min || 1)) * 255)));
-            };
-            const [rN, gN, bN] = [red, green, blue].map(normalize);
-            const canvas = Object.assign(document.createElement("canvas"), { width, height });
-            const ctx = canvas.getContext("2d");
-            ctx.imageSmoothingEnabled = false;
-            const imgData = ctx.createImageData(width, height);
-            for (let i = 0; i < rN.length; i++) {
-                const idx = i * 4;
-                if (rN[i] === 0 && gN[i] === 0 && bN[i] === 0) imgData.data[idx + 3] = 0;
-                else { imgData.data[idx] = rN[i]; imgData.data[idx + 1] = gN[i]; imgData.data[idx + 2] = bN[i]; imgData.data[idx + 3] = 255; }
-            }
-            ctx.putImageData(imgData, 0, 0);
+            const buf = await (await fetch(path)).arrayBuffer();
+            const { dataUrl, bbox, crsCode } = await geotiffToCanvasDataUrl(buf);
             const bounds = crsCode === "EPSG:4326" ? [[bbox[1], bbox[0]], [bbox[3], bbox[2]]] : transformBounds(bbox, crsCode);
-            return { dataUrl: canvas.toDataURL(), bounds, dateStr: filename.includes("composite") ? filename.replace("composite_", "").replace(".tif", "") : filename.replace("S2A_MSIL2A_", "").replace("_REFL.tif", "") };
+            const m = filename.match(/(\d{8})/);
+            const dateStr = m ? m[1] : "";
+            return { dataUrl, bounds, dateStr };
         }
 
         async function updateMap() {
@@ -271,6 +268,7 @@
             const params = new URLSearchParams(location.search);
             params.set("site", siteName);
             params.set("season", season);
+            params.set("mode", fusionMode);
             history.replaceState({}, "", `?${params}`);
             const urlDate = params.get("date");
             if (urlDate) document.getElementById("dateSlider").value = daysFromDate(urlDate);
@@ -318,8 +316,12 @@
             document.getElementById("seasonSelect").value = initialSeason;
             strategy = urlParams.get("strategy") || "aggressive";
             source = urlParams.get("source") || "s2";
+            fusionMode = urlParams.get("mode") === "itb" ? "itb" : "bti";
             document.getElementById("strategySelect").value = strategy;
             document.getElementById("sourceSelect").value = source;
+            document.getElementById("fusionModeSelect").value = fusionMode;
+            const ml = document.getElementById("mapLabel");
+            if (ml) ml.textContent = fusionMode === "itb" ? "Prepared GCC grayscale / S3 (closest available)" : "Prepared RGB (closest available)";
 
             const initSite = getSiteBySitename(initialSite);
             if (initSite?.geometry?.coordinates) {
@@ -350,6 +352,14 @@
                 source = this.value;
                 urlParams.set("source", source);
                 history.replaceState({}, "", `?${urlParams}`);
+                loadTimeseries(); updateMap();
+            });
+            document.getElementById("fusionModeSelect").addEventListener("change", function() {
+                fusionMode = this.value;
+                urlParams.set("mode", fusionMode);
+                history.replaceState({}, "", `?${urlParams}`);
+                const ml = document.getElementById("mapLabel");
+                if (ml) ml.textContent = fusionMode === "itb" ? "Prepared GCC grayscale / S3 (closest available)" : "Prepared RGB (closest available)";
                 loadTimeseries(); updateMap();
             });
 

@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Metrics</title>
+    <style>
+        body { margin: 0; font-family: sans-serif; }
+        .nav { margin-bottom: 15px; font-size: 14px; }
+        .nav a { margin-right: 12px; color: #0066cc; text-decoration: none; }
+        .nav a:hover { text-decoration: underline; }
+        .nav a.active { font-weight: bold; }
+        .container { max-width: 1100px; margin: 0 auto; padding: 20px; }
+        .selectors { margin-bottom: 20px; }
+        .selectors select { padding: 5px 10px; font-size: 14px; margin-right: 15px; }
+        h1 { font-size: 22px; }
+        h2 { font-size: 16px; margin-top: 24px; color: #333; }
+        table { border-collapse: collapse; width: 100%; font-size: 13px; margin-bottom: 12px; }
+        th, td { border: 1px solid #ccc; padding: 6px 8px; text-align: left; }
+        th { background: #f5f5f5; }
+        td.num { text-align: right; font-variant-numeric: tabular-nums; }
+        .empty { color: #666; font-style: italic; }
+        .err { color: #a00; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="nav">
+            <a href="index.html">Full</a>
+            <a href="preselection.html">Pre-selection</a>
+            <a href="prepared.html">Prepared</a>
+            <a href="fusion.html">Fusion</a>
+            <a href="postprocessed.html">Postprocessed</a>
+            <a href="metrics.html" class="active">Metrics</a>
+        </div>
+        <h1 id="siteName">Metrics</h1>
+        <div class="selectors">
+            <label>Site:</label>
+            <select id="siteSelect"></select>
+            <label>Season:</label>
+            <select id="seasonSelect"></select>
+        </div>
+        <div id="content"></div>
+    </div>
+    <script>
+        const METRIC_COLS = ["pearson_r", "r_squared", "rmse", "mae", "nrmse", "nse", "n_samples"];
+        let siteName = "innsbruck", season = "2024";
+        let availableSiteSeasons = {};
+        const urlParams = new URLSearchParams(location.search);
+
+        async function probeMetrics(sn, s) {
+            try {
+                const res = await fetch(`data/${sn}/${s}/metrics.json`, { method: "HEAD" });
+                return res.ok;
+            } catch { return false; }
+        }
+
+        function fmt(v) {
+            if (v == null || typeof v !== "number") return "—";
+            return Number.isInteger(v) ? String(v) : v.toFixed(4);
+        }
+
+        function tableSection(title, obj) {
+            if (!obj || typeof obj !== "object" || !Object.keys(obj).length) {
+                return `<h2>${title}</h2><p class="empty">No data</p>`;
+            }
+            const keys = Object.keys(obj).sort();
+            let head = `<tr><th>Scenario</th>${METRIC_COLS.map((c) => `<th>${c}</th>`).join("")}</tr>`;
+            const rows = keys.map((k) => {
+                const m = obj[k] || {};
+                return `<tr><td>${k}</td>${METRIC_COLS.map((c) => `<td class="num">${fmt(m[c])}</td>`).join("")}</tr>`;
+            }).join("");
+            return `<h2>${title}</h2><table>${head}${rows}</table>`;
+        }
+
+        function render(data) {
+            const el = document.getElementById("content");
+            if (!data) {
+                el.innerHTML = `<p class="err">Could not load metrics.json</p>`;
+                return;
+            }
+            let html = "";
+            if (data.phenocam_stats) {
+                html += `<h2>PhenoCam</h2><table><tr><th>mean</th><th>std</th><th>min</th><th>max</th><th>n</th></tr><tr>`;
+                const p = data.phenocam_stats;
+                html += `<td class="num">${fmt(p.mean)}</td><td class="num">${fmt(p.std)}</td><td class="num">${fmt(p.min)}</td><td class="num">${fmt(p.max)}</td><td class="num">${fmt(p.n_samples)}</td></tr></table>`;
+            }
+            if (data.baseline && data.baseline.s2) {
+                html += `<h2>Baseline S2 (temporal)</h2><table><tr>${METRIC_COLS.map((c) => `<th>${c}</th>`).join("")}</tr><tr>`;
+                const b = data.baseline.s2;
+                html += METRIC_COLS.map((c) => `<td class="num">${fmt(b[c])}</td>`).join("") + "</tr></table>";
+            }
+            html += tableSection("Temporal (vs PhenoCam)", data.temporal);
+            html += tableSection("Spatial (3×3 fusion mean vs PhenoCam)", data.spatial);
+            if (data.summary) {
+                html += `<h2>Summary</h2><pre style="font-size:13px;background:#f9f9f9;padding:10px;">${JSON.stringify(data.summary, null, 2)}</pre>`;
+            }
+            el.innerHTML = html || `<p class="empty">Empty metrics file</p>`;
+        }
+
+        async function load() {
+            try {
+                const res = await fetch(`data/${siteName}/${season}/metrics.json`);
+                render(res.ok ? await res.json() : null);
+            } catch {
+                render(null);
+            }
+            const site = window.sitesData?.features?.find((f) => f.properties?.sitename === siteName);
+            document.getElementById("siteName").textContent = (site?.properties?.description || siteName) + " — " + season;
+            urlParams.set("site", siteName);
+            urlParams.set("season", season);
+            history.replaceState({}, "", `?${urlParams}`);
+        }
+
+        async function init() {
+            try {
+                const res = await fetch("data/sites.geojson");
+                window.sitesData = res.ok ? await res.json() : { features: [] };
+            } catch { window.sitesData = { features: [] }; }
+            const features = window.sitesData.features || [];
+            for (const f of features) {
+                const sn = f.properties?.sitename;
+                if (!sn) continue;
+                const seasonsFromGeo = f.properties?.seasons ? Object.keys(f.properties.seasons).sort() : [];
+                const withData = [];
+                for (const s of seasonsFromGeo) {
+                    if (await probeMetrics(sn, s)) withData.push(s);
+                }
+                if (withData.length) availableSiteSeasons[sn] = withData;
+            }
+            const availableSites = Object.keys(availableSiteSeasons);
+            const siteSelect = document.getElementById("siteSelect");
+            siteSelect.innerHTML = "";
+            (availableSites.length ? availableSites.sort() : ["innsbruck"]).forEach((sn) => {
+                const opt = document.createElement("option");
+                opt.value = sn;
+                opt.textContent = sn;
+                siteSelect.appendChild(opt);
+                if (!availableSiteSeasons[sn]) availableSiteSeasons[sn] = ["2024"];
+            });
+            const urlSite = urlParams.get("site");
+            const urlSeason = urlParams.get("season");
+            const initialSite = urlSite && availableSiteSeasons[urlSite] ? urlSite : availableSites[0] || "innsbruck";
+            const initialSeason =
+                urlSeason && (availableSiteSeasons[initialSite] || []).includes(urlSeason)
+                    ? urlSeason
+                    : (availableSiteSeasons[initialSite] || [])[0] || "2024";
+            siteSelect.value = initialSite;
+            document.getElementById("seasonSelect").innerHTML = (availableSiteSeasons[initialSite] || [])
+                .map((s) => `<option value="${s}">${s}</option>`)
+                .join("");
+            document.getElementById("seasonSelect").value = initialSeason;
+            siteName = initialSite;
+            season = initialSeason;
+
+            siteSelect.addEventListener("change", function () {
+                const sn = this.value;
+                const seas = availableSiteSeasons[sn] || [];
+                document.getElementById("seasonSelect").innerHTML = seas.map((s) => `<option value="${s}">${s}</option>`).join("");
+                document.getElementById("seasonSelect").value = seas[0] || "2024";
+                siteName = sn;
+                season = document.getElementById("seasonSelect").value;
+                load();
+            });
+            document.getElementById("seasonSelect").addEventListener("change", function () {
+                season = this.value;
+                load();
+            });
+            await load();
+        }
+        init();
+    </script>
+</body>
+</html>
