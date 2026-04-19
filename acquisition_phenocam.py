@@ -1,13 +1,40 @@
 """PhenoCam acquisition from PhenoCam Network API."""
+
 import csv
 import json
 import requests
 from pathlib import Path
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from io import StringIO
 
 PHENOCAM_API = "https://phenocam.nau.edu/api"
+
+
+def _phenocam_summary_gcc_value(row, use_mean_fallback: bool):
+    """Extract daily GCC from a one-day summary row.
+
+    Prefers **gcc_90** (90th percentile; matches PhenoCam gcc90 / thesis ground truth).
+    Skips rows flagged as outliers in ``outlierflag_gcc_90`` when present.
+    With ``use_mean_fallback``, uses ``gcc_mean`` for legacy CSVs missing ``gcc_90``.
+    """
+    if not use_mean_fallback:
+        oflag = row.get("outlierflag_gcc_90")
+        if oflag is not None and str(oflag).strip() in ("1", "1.0"):
+            return None
+
+    raw = row.get("gcc_mean" if use_mean_fallback else "gcc_90")
+    if raw is None:
+        return None
+    text = str(raw).strip()
+    if not text or text.upper() == "NA":
+        return None
+    try:
+        val = float(text)
+    except ValueError:
+        return None
+    if val <= -9998.0:
+        return None
+    return val
 
 
 def _find_start_offset(site_name, start_dt, total_count):
@@ -20,7 +47,7 @@ def _find_start_offset(site_name, start_dt, total_count):
         response = requests.get(
             f"{PHENOCAM_API}/middayimages/",
             params={"site": site_name, "limit": limit, "offset": mid},
-            timeout=30
+            timeout=30,
         )
         response.raise_for_status()
         results = response.json().get("results", [])
@@ -65,7 +92,7 @@ def _download_phenocam_images(season, site_position, site_name, date_range=None)
         response = requests.get(
             f"{PHENOCAM_API}/middayimages/",
             params={"site": site_name, "limit": 1},
-            timeout=30
+            timeout=30,
         )
         response.raise_for_status()
         total_count = response.json().get("count", 0)
@@ -74,7 +101,9 @@ def _download_phenocam_images(season, site_position, site_name, date_range=None)
             print(f"[PhenoCam] No images found for site '{site_name}'")
             return
 
-        print(f"[PhenoCam] Found {total_count} total images, estimating start offset...")
+        print(
+            f"[PhenoCam] Found {total_count} total images, estimating start offset..."
+        )
         start_offset = _find_start_offset(site_name, start_dt, total_count)
 
         url = f"{PHENOCAM_API}/middayimages/"
@@ -114,7 +143,9 @@ def _download_phenocam_images(season, site_position, site_name, date_range=None)
                 params = None
                 page += 1
                 if page % 50 == 0:
-                    print(f"[PhenoCam] Processed {page} pages, found {len(images)} images in range...")
+                    print(
+                        f"[PhenoCam] Processed {page} pages, found {len(images)} images in range..."
+                    )
     except requests.exceptions.HTTPError as e:
         if e.response.status_code == 404:
             print(f"[PhenoCam] Site '{site_name}' not found")
@@ -176,7 +207,9 @@ def _download_phenocam_gcc(season, site_position, site_name, date_range=None):
             r = requests.get(url, params=params, timeout=30)
             r.raise_for_status()
             data = r.json()
-            rois.extend([roi for roi in data.get("results", []) if roi["site"] == site_name])
+            rois.extend(
+                [roi for roi in data.get("results", []) if roi["site"] == site_name]
+            )
             url = data.get("next")
             params = None
             if len(rois) > 0:
@@ -186,7 +219,7 @@ def _download_phenocam_gcc(season, site_position, site_name, date_range=None):
             return
         csv_url = rois[0].get("one_day_summary")
         if not csv_url:
-            print(f"[PhenoCam-GI] No CSV data URL found for ROI")
+            print("[PhenoCam-GI] No CSV data URL found for ROI")
             return
     except requests.exceptions.RequestException as e:
         print(f"[PhenoCam-GI] Error fetching ROIs: {e}")
@@ -196,8 +229,17 @@ def _download_phenocam_gcc(season, site_position, site_name, date_range=None):
     try:
         csv_r = requests.get(csv_url, timeout=30)
         csv_r.raise_for_status()
-        lines = [l for l in csv_r.text.split('\n') if l and not l.startswith('#')]
+        lines = [
+            line for line in csv_r.text.split("\n") if line and not line.startswith("#")
+        ]
         reader = csv.DictReader(lines)
+        fieldnames = reader.fieldnames or ()
+        use_mean_fallback = "gcc_90" not in fieldnames
+        if use_mean_fallback:
+            print(
+                "[PhenoCam-GI] Warning: gcc_90 not in summary CSV; using gcc_mean (legacy export)"
+            )
+
         timeseries = []
         for row in reader:
             try:
@@ -206,9 +248,11 @@ def _download_phenocam_gcc(season, site_position, site_name, date_range=None):
                     continue
                 date = datetime.strptime(date_str, "%Y-%m-%d")
                 if start_dt <= date <= end_dt:
-                    gcc = row.get("gcc_mean")
-                    if gcc and gcc != "NA":
-                        timeseries.append({"date": date.isoformat(), "greenness_index": float(gcc)})
+                    gcc = _phenocam_summary_gcc_value(row, use_mean_fallback)
+                    if gcc is not None:
+                        timeseries.append(
+                            {"date": date.isoformat(), "greenness_index": gcc}
+                        )
             except (ValueError, KeyError):
                 continue
     except requests.exceptions.RequestException as e:
@@ -229,4 +273,6 @@ def _download_phenocam_gcc(season, site_position, site_name, date_range=None):
         writer.writeheader()
         writer.writerows(timeseries)
 
-    print(f"[PhenoCam-GI] Saved: {json_path} and {csv_path} ({len(timeseries)} entries)")
+    print(
+        f"[PhenoCam-GI] Saved: {json_path} and {csv_path} ({len(timeseries)} entries)"
+    )
