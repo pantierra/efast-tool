@@ -1,4 +1,4 @@
-"""Metrics and statistics: temporal/spatial metrics and PhenoCam stats."""
+"""Metrics and statistics: temporal metrics and PhenoCam stats."""
 
 import json
 import numpy as np
@@ -7,10 +7,6 @@ from datetime import datetime, timedelta
 from scipy import sparse
 from scipy.sparse.linalg import spsolve
 from scipy.stats import pearsonr
-import rasterio
-from rasterio.warp import transform as transform_coords
-
-from metrics_indices import BLUE_BAND, GREEN_BAND, RED_BAND
 
 WHITTAKER_LAMBDA_DAYS_SQ = 400.0
 
@@ -205,178 +201,10 @@ def _whittaker_smooth_dict(obs_dates, obs_values, lam: float, n_min: int = 3):
     return out
 
 
-def _get_spatial_stats_from_raster(raster_file, site_position):
-    """Extract spatial statistics (mean, std, min, max) from GCC raster in 3x3 window."""
-    try:
-        with rasterio.open(raster_file) as src:
-            if src.count == 1:
-                g = src.read(1).astype(np.float32)
-                lon, lat = site_position[1], site_position[0]
-                x, y = transform_coords("EPSG:4326", src.crs, [lon], [lat])
-                if not (
-                    src.bounds.left <= x[0] <= src.bounds.right
-                    and src.bounds.bottom <= y[0] <= src.bounds.top
-                ):
-                    return None
-                row, col = src.index(x[0], y[0])
-                if row < 0 or row >= src.height or col < 0 or col >= src.width:
-                    return None
-                r0, r1 = max(0, row - 1), min(src.height, row + 2)
-                c0, c1 = max(0, col - 1), min(src.width, col + 2)
-                win = g[r0:r1, c0:c1]
-                mask = np.isfinite(win) & (win > 0)
-                if not np.any(mask):
-                    return None
-                valid = win[mask]
-                return {
-                    "mean": float(np.mean(valid)),
-                    "std": float(np.std(valid)),
-                    "min": float(np.min(valid)),
-                    "max": float(np.max(valid)),
-                }
-            if src.count < 3:
-                return None
-
-            blue = src.read(BLUE_BAND).astype(np.float32)
-            green = src.read(GREEN_BAND).astype(np.float32)
-            red = src.read(RED_BAND).astype(np.float32)
-
-            lon, lat = site_position[1], site_position[0]
-            x, y = transform_coords("EPSG:4326", src.crs, [lon], [lat])
-
-            if not (
-                src.bounds.left <= x[0] <= src.bounds.right
-                and src.bounds.bottom <= y[0] <= src.bounds.top
-            ):
-                return None
-
-            row, col = src.index(x[0], y[0])
-            if row < 0 or row >= src.height or col < 0 or col >= src.width:
-                return None
-
-            # Extract 3x3 window with boundary handling
-            r0, r1 = max(0, row - 1), min(src.height, row + 2)
-            c0, c1 = max(0, col - 1), min(src.width, col + 2)
-            blue_window = blue[r0:r1, c0:c1]
-            green_window = green[r0:r1, c0:c1]
-            red_window = red[r0:r1, c0:c1]
-
-            # Calculate GCC for each pixel in window
-            total = red_window + green_window + blue_window
-            mask = (
-                (total > 0)
-                & ~np.isnan(total)
-                & (blue_window >= 0)
-                & (green_window >= 0)
-                & (red_window >= 0)
-            )
-            if not np.any(mask):
-                return None
-
-            gcc_window = np.zeros_like(green_window, dtype=np.float32)
-            gcc_window[mask] = green_window[mask] / total[mask]
-            valid_gcc = gcc_window[mask]
-
-            if len(valid_gcc) == 0:
-                return None
-
-            return {
-                "mean": float(np.mean(valid_gcc)),
-                "std": float(np.std(valid_gcc)),
-                "min": float(np.min(valid_gcc)),
-                "max": float(np.max(valid_gcc)),
-            }
-    except Exception:
-        return None
-
-
-def calculate_spatial_metrics(fusion_raster_dir, phenocam_ts, site_position):
-    """Calculate r and R² on spatial statistics."""
-    fusion_raster_dir = Path(fusion_raster_dir)
-    if not fusion_raster_dir.exists():
-        return None
-
-    spatial_means = []
-    phenocam_vals = []
-
-    # Process each fusion raster file
-    for raster_file in sorted(fusion_raster_dir.glob("*.geotiff")):
-        if "DIST_CLOUD" in raster_file.name:
-            continue
-
-        # Extract date from filename
-        parts = raster_file.stem.split("_")
-        date_str = None
-        for part in parts:
-            if len(part) == 8 and part.isdigit():
-                date_str = part
-                break
-
-        if not date_str:
-            continue
-
-        # Convert to ISO format for matching
-        try:
-            date = datetime.strptime(date_str, "%Y%m%d").isoformat()
-        except ValueError:
-            continue
-
-        # Get phenocam value for this date
-        phenocam_val = phenocam_ts.get(date)
-        if phenocam_val is None:
-            continue
-
-        # Extract spatial statistics
-        stats = _get_spatial_stats_from_raster(raster_file, site_position)
-        if stats is None:
-            continue
-
-        spatial_means.append(stats["mean"])
-        phenocam_vals.append(phenocam_val)
-
-    if len(spatial_means) < 2:
-        return None
-
-    spatial_means = np.array(spatial_means)
-    phenocam_vals = np.array(phenocam_vals)
-
-    return {
-        "pearson_r": pearson_correlation(phenocam_vals, spatial_means),
-        "r_squared": r_squared(phenocam_vals, spatial_means),
-        "n_samples": len(spatial_means),
-    }
-
-
-def calculate_scenario_metrics(season, site_name, strategy, sigma, site_position):
-    """Calculate metrics for one scenario."""
-    base = Path(f"data/{site_name}/{season}")
-    processed_dir = f"processed_{strategy}_sigma{sigma}"
-
-    # Load timeseries
-    fusion_ts_path = base / processed_dir / "gcc" / "fusion" / "timeseries.json"
-    phenocam_ts_path = base / "raw" / "phenocam" / "phenocam_gcc.json"
-
-    fusion_ts = load_timeseries(fusion_ts_path)
-    phenocam_ts = load_timeseries(phenocam_ts_path)
-
-    if not fusion_ts or not phenocam_ts:
-        return None, None
-
-    # Calculate temporal metrics
-    temporal_metrics = calculate_temporal_metrics(fusion_ts, phenocam_ts)
-
-    # Calculate spatial metrics
-    fusion_raster_dir = base / processed_dir / "fusion"
-    spatial_metrics = calculate_spatial_metrics(
-        fusion_raster_dir, phenocam_ts, site_position
-    )
-
-    return temporal_metrics, spatial_metrics
-
-
 def calculate_all_metrics(season, site_name, site_position):
     """Calculate metrics for all 4 scenarios and save to JSON."""
-    results = {"temporal": {}, "spatial": {}}
+    del site_position
+    results = {"temporal": {}}
     base = Path(f"data/{site_name}/{season}")
 
     # Load phenocam timeseries once (same for all scenarios)
@@ -457,18 +285,9 @@ def calculate_all_metrics(season, site_name, site_position):
                 )
                 continue
 
-            # Calculate temporal metrics
             temporal_metrics = calculate_temporal_metrics(fusion_ts, phenocam_ts)
             if temporal_metrics:
                 results["temporal"][scenario_name] = temporal_metrics
-
-            # Calculate spatial metrics
-            fusion_raster_dir = base / processed_dir / "fusion"
-            spatial_metrics = calculate_spatial_metrics(
-                fusion_raster_dir, phenocam_ts, site_position
-            )
-            if spatial_metrics:
-                results["spatial"][scenario_name] = spatial_metrics
 
     for strategy in ["aggressive", "nonaggressive"]:
         for sigma in [20, 30]:
@@ -484,35 +303,6 @@ def calculate_all_metrics(season, site_name, site_position):
             temporal_metrics = calculate_temporal_metrics(fusion_ts, phenocam_ts)
             if temporal_metrics:
                 results["temporal"][scenario_name] = temporal_metrics
-            fusion_raster_dir = base / processed_dir / "fusion"
-            spatial_metrics = calculate_spatial_metrics(
-                fusion_raster_dir, phenocam_ts, site_position
-            )
-            if spatial_metrics:
-                results["spatial"][scenario_name] = spatial_metrics
-
-    # Add summary (primary: NSE vs PhenoCam; R² kept for comparison)
-    if results["temporal"]:
-        ti = list(results["temporal"].items())
-
-        def _score(k):
-            return lambda x: x[1].get(k) if x[1].get(k) is not None else float("-inf")
-
-        results["summary"] = {
-            "best_temporal_scenario": max(ti, key=_score("nse_pc"))[0],
-            "best_temporal_scenario_by_r2": max(ti, key=_score("r_squared"))[0],
-        }
-
-    if results["spatial"]:
-        best_spatial = max(
-            results["spatial"].items(),
-            key=lambda x: x[1].get("r_squared", -1)
-            if x[1].get("r_squared") is not None
-            else -1,
-        )
-        if "summary" not in results:
-            results["summary"] = {}
-        results["summary"]["best_spatial_scenario"] = best_spatial[0]
 
     # Save results
     output_path = Path(f"data/{site_name}/{season}/metrics.json")

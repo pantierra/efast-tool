@@ -19,6 +19,12 @@
         th { background: #f5f5f5; }
         td.num { text-align: right; font-variant-numeric: tabular-nums; }
         .compare-note { font-size: 12px; color: #555; margin: 0 0 8px 0; max-width: 720px; }
+        .section-note { font-size: 12px; color: #555; margin: -6px 0 8px 0; max-width: 720px; line-height: 1.45; }
+        .section-note code { background: #f1f1f1; padding: 1px 4px; border-radius: 3px; font-size: 11px; }
+        .intro { font-size: 13px; color: #333; background: #fafafa; border: 1px solid #e5e5e5;
+                 padding: 10px 12px; border-radius: 4px; margin-bottom: 18px; line-height: 1.5; }
+        .intro ul { margin: 6px 0 0 18px; padding: 0; }
+        .intro li { margin-bottom: 2px; }
         .empty { color: #666; font-style: italic; }
         .err { color: #a00; }
     </style>
@@ -44,8 +50,6 @@
     </div>
     <script>
         const METRIC_COLS = ["pearson_r", "r_squared", "rmse", "mae", "nrmse", "nse_pc", "n_samples"];
-        /** Spatial fusion metrics in metrics.json (no RMSE block at site level). */
-        const SPATIAL_METRIC_COLS = ["pearson_r", "r_squared", "n_samples"];
         function mv(m, c) {
             return c === "nse_pc" ? (m.nse_pc ?? m.nse) : m[c];
         }
@@ -66,8 +70,9 @@
         }
 
         function tableSection(title, obj) {
+            const heading = title ? `<h2>${title}</h2>` : "";
             if (!obj || typeof obj !== "object" || !Object.keys(obj).length) {
-                return `<h2>${title}</h2><p class="empty">No data</p>`;
+                return `${heading}<p class="empty">No data</p>`;
             }
             const keys = Object.keys(obj).sort();
             let head = `<tr><th>Scenario</th>${METRIC_COLS.map((c) => `<th>${c}</th>`).join("")}</tr>`;
@@ -75,7 +80,7 @@
                 const m = obj[k] || {};
                 return `<tr><td>${k}</td>${METRIC_COLS.map((c) => `<td class="num">${fmt(mv(m, c))}</td>`).join("")}</tr>`;
             }).join("");
-            return `<h2>${title}</h2><table>${head}${rows}</table>`;
+            return `${heading}<table>${head}${rows}</table>`;
         }
 
         /** Pair BtI keys (`aggressive_sigma20`) with ItB (`aggressive_sigma20_itb`). */
@@ -121,7 +126,9 @@
                     return `<tr><td>${p.label}</td>${cells}</tr>`;
                 })
                 .join("");
-            return `<h2>${title}</h2><p class="compare-note">${blurb}</p><table>${head}${rows}</table>`;
+            const heading = title ? `<h2>${title}</h2>` : "";
+            const note = blurb ? `<p class="compare-note">${blurb}</p>` : "";
+            return `${heading}${note}<table>${head}${rows}</table>`;
         }
 
         function baselineSection(b) {
@@ -149,28 +156,36 @@
                 return;
             }
             let html = "";
+            html += `
+                <div class="intro">
+                    All metrics compare a greenness index (GCC) from satellite products against PhenoCam
+                    ground-truth GCC at the site's 3×3 pixel window.
+                    <ul>
+                        <li><b>BtI</b> (<i>Bands-then-Index</i>): fuse S2/S3 reflectance, then compute GCC from the fused bands.</li>
+                        <li><b>ItB</b> (<i>Index-then-Bands</i>): compute GCC from S2 and S3 first, then fuse the GCC rasters.</li>
+                        <li>Scenarios combine a cloud-screening <b>strategy</b> (<code>aggressive</code> / <code>nonaggressive</code>)
+                            and an EFAST fusion <b>σ</b> (<code>sigma20</code> / <code>sigma30</code>).</li>
+                    </ul>
+                </div>`;
             if (data.phenocam_stats) {
-                html += `<h2>PhenoCam</h2><table><tr><th>mean</th><th>std</th><th>min</th><th>max</th><th>n</th></tr><tr>`;
+                html += `<h2>PhenoCam</h2>`;
+                html += `<p class="section-note">Summary statistics of the PhenoCam GCC timeseries used as ground truth for this site and season.</p>`;
+                html += `<table><tr><th>mean</th><th>std</th><th>min</th><th>max</th><th>n</th></tr><tr>`;
                 const p = data.phenocam_stats;
                 html += `<td class="num">${fmt(p.mean)}</td><td class="num">${fmt(p.std)}</td><td class="num">${fmt(p.min)}</td><td class="num">${fmt(p.max)}</td><td class="num">${fmt(p.n_samples)}</td></tr></table>`;
             }
-            html += baselineSection(data.baseline);
-            html += btiItbCompareSection(
-                "Temporal: BtI vs ItB (paired)",
-                data.temporal,
-                "Δ = ItB − BtI. For Pearson r, R², and NSE (%), positive Δ means ItB is higher. For RMSE, MAE, and NRMSE, negative Δ means ItB is better (lower error)."
-            );
-            html += tableSection("Temporal (vs PhenoCam)", data.temporal);
-            html += btiItbCompareSection(
-                "Spatial: BtI vs ItB (paired)",
-                data.spatial,
-                "Δ = ItB − BtI. For Pearson r and R², positive Δ means ItB is higher.",
-                SPATIAL_METRIC_COLS
-            );
-            html += tableSection("Spatial (3×3 fusion mean vs PhenoCam)", data.spatial);
-            if (data.summary) {
-                html += `<h2>Summary</h2><pre style="font-size:13px;background:#f9f9f9;padding:10px;">${JSON.stringify(data.summary, null, 2)}</pre>`;
+            const baselineHtml = baselineSection(data.baseline);
+            if (baselineHtml) {
+                html += `<h2>Baselines (temporal vs PhenoCam)</h2>`;
+                html += `<p class="section-note">Reference GCC series <i>before</i> any fusion: raw S2 (all dates and cloud-screened per strategy), S3 composite per strategy, and a Whittaker-smoothed S2 series (λ=400). Useful to see what fusion has to beat.</p>`;
+                html += baselineHtml.replace(/^<h2>[^<]*<\/h2>/, "");
             }
+            html += `<h2>Temporal: BtI vs ItB (paired)</h2>`;
+            html += `<p class="section-note">Per scenario (same strategy + σ), BtI and ItB side-by-side with <b>Δ = ItB − BtI</b>. Positive Δ is better for Pearson r, R², and NSE; negative Δ is better for RMSE, MAE, and NRMSE.</p>`;
+            html += btiItbCompareSection("", data.temporal, "") || `<p class="empty">No paired scenarios</p>`;
+            html += `<h2>Temporal (vs PhenoCam)</h2>`;
+            html += `<p class="section-note">Per-scenario agreement between the fusion GCC <b>timeseries</b> at the site 3×3 window and the PhenoCam GCC timeseries, across all matched dates. Scenarios ending in <code>_itb</code> are Index-then-Bands; the others are Bands-then-Index.</p>`;
+            html += tableSection("", data.temporal);
             el.innerHTML = html || `<p class="empty">Empty metrics file</p>`;
         }
 
