@@ -561,8 +561,8 @@
             
             const scenarios = ["aggressive_sigma20", "aggressive_sigma30", "nonaggressive_sigma20", "nonaggressive_sigma30"];
             const scenarioNames = ["Aggressive σ20", "Aggressive σ30", "Non-aggressive σ20", "Non-aggressive σ30"];
-            const metrics = ["pearson_r", "r_squared", "rmse", "mae", "nrmse", "nse"];
-            const metricLabels = { pearson_r: "r", r_squared: "R²", rmse: "RMSE", mae: "MAE", nrmse: "nRMSE", nse: "NSE" };
+            const metrics = ["pearson_r", "r_squared", "rmse", "mae", "nrmse", "nse_pc"];
+            const metricLabels = { pearson_r: "r", r_squared: "R²", rmse: "RMSE", mae: "MAE", nrmse: "nRMSE", nse_pc: "NSE_PC" };
             
             let html = "<table style='width:100%; border-collapse:collapse; font-size:11px;'>";
             html += "<thead><tr style='background:#f5f5f5; border-bottom:2px solid #ccc;'>";
@@ -576,8 +576,8 @@
                 html += `<tr style='border-bottom:2px solid #ccc; background:#f9f9f9;'>`;
                 html += `<td style='padding:6px 8px; font-weight:600;'>S2 (baseline)</td>`;
                 metrics.forEach(m => {
-                    const val = data[m];
-                    const fmt = val !== null && val !== undefined ? (m === "pearson_r" || m === "r_squared" || m === "nse" ? val.toFixed(3) : val.toFixed(4)) : "—";
+                    const val = m === "nse_pc" ? (data.nse_pc ?? data.nse) : data[m];
+                    const fmt = val !== null && val !== undefined ? (m === "pearson_r" || m === "r_squared" || m === "nse_pc" ? val.toFixed(3) : val.toFixed(4)) : "—";
                     html += `<td style='padding:6px 8px; text-align:right; font-family:monospace;'>${fmt}</td>`;
                 });
                 html += "</tr>";
@@ -590,8 +590,8 @@
                 html += `<tr style='border-bottom:1px solid #eee;'>`;
                 html += `<td style='padding:6px 8px; font-weight:500;'>${scenarioNames[i]}</td>`;
                 metrics.forEach(m => {
-                    const val = data[m];
-                    const fmt = val !== null && val !== undefined ? (m === "pearson_r" || m === "r_squared" || m === "nse" ? val.toFixed(3) : val.toFixed(4)) : "—";
+                    const val = m === "nse_pc" ? (data.nse_pc ?? data.nse) : data[m];
+                    const fmt = val !== null && val !== undefined ? (m === "pearson_r" || m === "r_squared" || m === "nse_pc" ? val.toFixed(3) : val.toFixed(4)) : "—";
                     html += `<td style='padding:6px 8px; text-align:right; font-family:monospace;'>${fmt}</td>`;
                 });
                 html += "</tr>";

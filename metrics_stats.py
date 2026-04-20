@@ -3,12 +3,23 @@
 import json
 import numpy as np
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta
+from scipy import sparse
+from scipy.sparse.linalg import spsolve
 from scipy.stats import pearsonr
 import rasterio
 from rasterio.warp import transform as transform_coords
 
 from metrics_indices import BLUE_BAND, GREEN_BAND, RED_BAND
+
+WHITTAKER_LAMBDA_DAYS_SQ = 400.0
+
+
+def _norm_date_key(s):
+    if s is None:
+        return None
+    t = str(s).strip()
+    return t.split("T")[0][:10] if "T" in t else t[:10]
 
 
 def load_timeseries(filepath):
@@ -22,14 +33,24 @@ def load_timeseries(filepath):
 
 def match_dates(fusion_ts, phenocam_ts):
     """Match dates between timeseries, return aligned numpy arrays (filter None values)."""
-    common_dates = set(fusion_ts.keys()) & set(phenocam_ts.keys())
+
+    def _bundle(m):
+        out = {}
+        for k, v in m.items():
+            nk = _norm_date_key(k)
+            if nk and nk not in out:
+                out[nk] = v
+        return out
+
+    fa, pa = _bundle(fusion_ts), _bundle(phenocam_ts)
+    common_dates = set(fa) & set(pa)
     fusion_vals = []
     phenocam_vals = []
     dates = []
 
     for date in sorted(common_dates):
-        fusion_val = fusion_ts[date]
-        phenocam_val = phenocam_ts[date]
+        fusion_val = fa[date]
+        phenocam_val = pa[date]
         if fusion_val is not None and phenocam_val is not None:
             fusion_vals.append(fusion_val)
             phenocam_vals.append(phenocam_val)
@@ -94,19 +115,21 @@ def nse(y_true, y_pred):
 
 
 def calculate_temporal_metrics(fusion_ts, phenocam_ts):
-    """Calculate all 6 temporal metrics."""
+    """Temporal metrics vs PhenoCam (nse_pc; nse is the same value)."""
     fusion_vals, phenocam_vals, dates = match_dates(fusion_ts, phenocam_ts)
 
     if len(fusion_vals) < 2:
         return None
 
+    n_pc = nse(phenocam_vals, fusion_vals)
     metrics = {
         "pearson_r": pearson_correlation(phenocam_vals, fusion_vals),
         "r_squared": r_squared(phenocam_vals, fusion_vals),
         "rmse": rmse(phenocam_vals, fusion_vals),
         "mae": mae(phenocam_vals, fusion_vals),
         "nrmse": nrmse(phenocam_vals, fusion_vals),
-        "nse": nse(phenocam_vals, fusion_vals),
+        "nse_pc": n_pc,
+        "nse": n_pc,
         "n_samples": len(fusion_vals),
         "date_range": {"start": dates[0], "end": dates[-1]} if dates else None,
     }
@@ -127,6 +150,59 @@ def calculate_phenocam_stats(phenocam_ts):
         "max": float(np.max(vals)),
         "n_samples": len(vals),
     }
+
+
+def _s2_kept_date_set(base: Path, strategy: str) -> set:
+    path = base / "raw" / "preselection" / "s2_preselection.json"
+    if not path.exists():
+        return set()
+    with open(path) as f:
+        rows = json.load(f)
+    key = f"excluded_{strategy}"
+    out = set()
+    for e in rows:
+        if e.get(key):
+            continue
+        nk = _norm_date_key(e.get("date"))
+        if nk:
+            out.add(nk)
+    return out
+
+
+def _whittaker_smooth_dict(obs_dates, obs_values, lam: float, n_min: int = 3):
+    """Daily Whittaker (weights 1 at obs); returns {YYYY-MM-DD: z}."""
+    pairs = [
+        (_norm_date_key(d), float(v))
+        for d, v in zip(obs_dates, obs_values)
+        if v is not None and _norm_date_key(d)
+    ]
+    if len(pairs) < 2:
+        return {}
+    days = sorted({p[0] for p in pairs})
+    t0 = datetime.strptime(days[0], "%Y-%m-%d").date()
+    t1 = datetime.strptime(days[-1], "%Y-%m-%d").date()
+    n = (t1 - t0).days + 1
+    if n < n_min:
+        return {}
+
+    w = np.zeros(n)
+    y = np.zeros(n)
+    for dk, val in pairs:
+        i = (datetime.strptime(dk, "%Y-%m-%d").date() - t0).days
+        if 0 <= i < n:
+            w[i] = 1.0
+            y[i] = val
+
+    D = sparse.diags(
+        [1.0, -2.0, 1.0], [0, 1, 2], shape=(n - 2, n), format="csc", dtype=np.float64
+    )
+    H = D.T @ D
+    Wm = sparse.diags(w.astype(np.float64), format="csc")
+    z = spsolve(Wm + lam * H, w * y)
+    out = {}
+    for i in range(n):
+        out[(t0 + timedelta(days=i)).isoformat()] = float(z[i])
+    return out
 
 
 def _get_spatial_stats_from_raster(raster_file, site_position):
@@ -316,15 +392,52 @@ def calculate_all_metrics(season, site_name, site_position):
     if phenocam_stats:
         results["phenocam_stats"] = phenocam_stats
 
-    # Calculate S2 baseline metrics once (S2 data is identical across scenarios)
-    s2_ts_path = (
-        base / "processed_aggressive_sigma20" / "gcc" / "s2" / "timeseries.json"
-    )
-    s2_ts = load_timeseries(s2_ts_path)
+    baseline = {}
+    s2_ts = {}
+    for sub in ("processed_aggressive_sigma20", "processed_nonaggressive_sigma20"):
+        p = base / sub / "gcc" / "s2" / "timeseries.json"
+        if p.exists():
+            s2_ts = load_timeseries(p)
+            if s2_ts:
+                break
     if s2_ts:
-        s2_metrics = calculate_temporal_metrics(s2_ts, phenocam_ts)
-        if s2_metrics:
-            results["baseline"] = {"s2": s2_metrics}
+        m0 = calculate_temporal_metrics(s2_ts, phenocam_ts)
+        if m0:
+            baseline["s2"] = m0
+        for strategy in ("aggressive", "nonaggressive"):
+            kept = _s2_kept_date_set(base, strategy)
+            filtered = [
+                (k, v)
+                for k, v in sorted(
+                    s2_ts.items(), key=lambda x: _norm_date_key(x[0]) or ""
+                )
+                if _norm_date_key(k) in kept and v is not None
+            ]
+            if not filtered:
+                continue
+            sub_ts = dict(filtered)
+            mcf = calculate_temporal_metrics(sub_ts, phenocam_ts)
+            if mcf:
+                baseline.setdefault("s2_cloudfree", {})[strategy] = mcf
+            obs_d, obs_v = zip(*filtered)
+            smooth = _whittaker_smooth_dict(obs_d, obs_v, WHITTAKER_LAMBDA_DAYS_SQ)
+            if smooth:
+                mw = calculate_temporal_metrics(smooth, phenocam_ts)
+                if mw:
+                    baseline.setdefault("s2_whittaker_lambda400", {})[strategy] = mw
+
+    for strategy in ("aggressive", "nonaggressive"):
+        p = base / f"processed_{strategy}_sigma20" / "gcc" / "s3" / "timeseries.json"
+        if not p.exists():
+            continue
+        s3_ts = load_timeseries(p)
+        if s3_ts:
+            m3 = calculate_temporal_metrics(s3_ts, phenocam_ts)
+            if m3:
+                baseline.setdefault("s3", {})[strategy] = m3
+
+    if baseline:
+        results["baseline"] = baseline
 
     # Calculate fusion metrics for each scenario
     for strategy in ["aggressive", "nonaggressive"]:
@@ -378,15 +491,17 @@ def calculate_all_metrics(season, site_name, site_position):
             if spatial_metrics:
                 results["spatial"][scenario_name] = spatial_metrics
 
-    # Add summary
+    # Add summary (primary: NSE vs PhenoCam; R² kept for comparison)
     if results["temporal"]:
-        best_temporal = max(
-            results["temporal"].items(),
-            key=lambda x: x[1].get("r_squared", -1)
-            if x[1].get("r_squared") is not None
-            else -1,
-        )
-        results["summary"] = {"best_temporal_scenario": best_temporal[0]}
+        ti = list(results["temporal"].items())
+
+        def _score(k):
+            return lambda x: x[1].get(k) if x[1].get(k) is not None else float("-inf")
+
+        results["summary"] = {
+            "best_temporal_scenario": max(ti, key=_score("nse_pc"))[0],
+            "best_temporal_scenario_by_r2": max(ti, key=_score("r_squared"))[0],
+        }
 
     if results["spatial"]:
         best_spatial = max(

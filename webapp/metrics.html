@@ -18,6 +18,7 @@
         th, td { border: 1px solid #ccc; padding: 6px 8px; text-align: left; }
         th { background: #f5f5f5; }
         td.num { text-align: right; font-variant-numeric: tabular-nums; }
+        .compare-note { font-size: 12px; color: #555; margin: 0 0 8px 0; max-width: 720px; }
         .empty { color: #666; font-style: italic; }
         .err { color: #a00; }
     </style>
@@ -42,7 +43,12 @@
         <div id="content"></div>
     </div>
     <script>
-        const METRIC_COLS = ["pearson_r", "r_squared", "rmse", "mae", "nrmse", "nse", "n_samples"];
+        const METRIC_COLS = ["pearson_r", "r_squared", "rmse", "mae", "nrmse", "nse_pc", "n_samples"];
+        /** Spatial fusion metrics in metrics.json (no RMSE block at site level). */
+        const SPATIAL_METRIC_COLS = ["pearson_r", "r_squared", "n_samples"];
+        function mv(m, c) {
+            return c === "nse_pc" ? (m.nse_pc ?? m.nse) : m[c];
+        }
         let siteName = "innsbruck", season = "2024";
         let availableSiteSeasons = {};
         const urlParams = new URLSearchParams(location.search);
@@ -67,9 +73,73 @@
             let head = `<tr><th>Scenario</th>${METRIC_COLS.map((c) => `<th>${c}</th>`).join("")}</tr>`;
             const rows = keys.map((k) => {
                 const m = obj[k] || {};
-                return `<tr><td>${k}</td>${METRIC_COLS.map((c) => `<td class="num">${fmt(m[c])}</td>`).join("")}</tr>`;
+                return `<tr><td>${k}</td>${METRIC_COLS.map((c) => `<td class="num">${fmt(mv(m, c))}</td>`).join("")}</tr>`;
             }).join("");
             return `<h2>${title}</h2><table>${head}${rows}</table>`;
+        }
+
+        /** Pair BtI keys (`aggressive_sigma20`) with ItB (`aggressive_sigma20_itb`). */
+        function btiItbPairs(obj) {
+            if (!obj || typeof obj !== "object") return [];
+            const pairs = [];
+            for (const itbKey of Object.keys(obj)) {
+                if (!itbKey.endsWith("_itb")) continue;
+                const btiKey = itbKey.slice(0, -"_itb".length);
+                const bti = obj[btiKey];
+                const itb = obj[itbKey];
+                if (!bti || !itb) continue;
+                pairs.push({ label: btiKey, bti, itb });
+            }
+            pairs.sort((a, b) => a.label.localeCompare(b.label));
+            return pairs;
+        }
+
+        function fmtDelta(btiM, itbM, col) {
+            const a = mv(btiM, col);
+            const b = mv(itbM, col);
+            if (a == null || b == null || typeof a !== "number" || typeof b !== "number") return "—";
+            return fmt(b - a);
+        }
+
+        function btiItbCompareSection(title, obj, blurb, metricCols = METRIC_COLS) {
+            const pairs = btiItbPairs(obj);
+            if (!pairs.length) return "";
+            const subHead = metricCols.map(
+                () => `<th class="num">BtI</th><th class="num">ItB</th><th class="num">Δ</th>`
+            ).join("");
+            const head =
+                `<tr><th rowspan="2">Scenario</th>${metricCols.map((c) => `<th colspan="3">${c}</th>`).join("")}</tr>` +
+                `<tr>${subHead}</tr>`;
+            const rows = pairs
+                .map((p) => {
+                    const cells = metricCols.map((c) => {
+                        const vB = fmt(mv(p.bti, c));
+                        const vI = fmt(mv(p.itb, c));
+                        const d = fmtDelta(p.bti, p.itb, c);
+                        return `<td class="num">${vB}</td><td class="num">${vI}</td><td class="num">${d}</td>`;
+                    }).join("");
+                    return `<tr><td>${p.label}</td>${cells}</tr>`;
+                })
+                .join("");
+            return `<h2>${title}</h2><p class="compare-note">${blurb}</p><table>${head}${rows}</table>`;
+        }
+
+        function baselineSection(b) {
+            if (!b || typeof b !== "object") return "";
+            const rows = [];
+            const pushRow = (label, m) => {
+                if (!m || typeof m !== "object") return;
+                rows.push(`<tr><td>${label}</td>${METRIC_COLS.map((c) => `<td class="num">${fmt(mv(m, c))}</td>`).join("")}</tr>`);
+            };
+            pushRow("S2 GCC (all acquisitions)", b.s2);
+            for (const strat of ["aggressive", "nonaggressive"]) {
+                pushRow(`S3 composite GCC (${strat})`, b.s3?.[strat]);
+                pushRow(`S2 GCC cloud-screened (${strat})`, b.s2_cloudfree?.[strat]);
+                pushRow(`S2 Whittaker λ=400 (${strat})`, b.s2_whittaker_lambda400?.[strat]);
+            }
+            if (!rows.length) return "";
+            const head = `<tr><th>Baseline</th>${METRIC_COLS.map((c) => `<th>${c}</th>`).join("")}</tr>`;
+            return `<h2>Baselines (temporal vs PhenoCam)</h2><table>${head}${rows.join("")}</table>`;
         }
 
         function render(data) {
@@ -84,12 +154,19 @@
                 const p = data.phenocam_stats;
                 html += `<td class="num">${fmt(p.mean)}</td><td class="num">${fmt(p.std)}</td><td class="num">${fmt(p.min)}</td><td class="num">${fmt(p.max)}</td><td class="num">${fmt(p.n_samples)}</td></tr></table>`;
             }
-            if (data.baseline && data.baseline.s2) {
-                html += `<h2>Baseline S2 (temporal)</h2><table><tr>${METRIC_COLS.map((c) => `<th>${c}</th>`).join("")}</tr><tr>`;
-                const b = data.baseline.s2;
-                html += METRIC_COLS.map((c) => `<td class="num">${fmt(b[c])}</td>`).join("") + "</tr></table>";
-            }
+            html += baselineSection(data.baseline);
+            html += btiItbCompareSection(
+                "Temporal: BtI vs ItB (paired)",
+                data.temporal,
+                "Δ = ItB − BtI. For Pearson r, R², and NSE (%), positive Δ means ItB is higher. For RMSE, MAE, and NRMSE, negative Δ means ItB is better (lower error)."
+            );
             html += tableSection("Temporal (vs PhenoCam)", data.temporal);
+            html += btiItbCompareSection(
+                "Spatial: BtI vs ItB (paired)",
+                data.spatial,
+                "Δ = ItB − BtI. For Pearson r and R², positive Δ means ItB is higher.",
+                SPATIAL_METRIC_COLS
+            );
             html += tableSection("Spatial (3×3 fusion mean vs PhenoCam)", data.spatial);
             if (data.summary) {
                 html += `<h2>Summary</h2><pre style="font-size:13px;background:#f9f9f9;padding:10px;">${JSON.stringify(data.summary, null, 2)}</pre>`;
