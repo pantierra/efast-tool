@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Phenology</title>
+    <style>
+        body { margin: 0; font-family: sans-serif; }
+        .nav { margin-bottom: 15px; font-size: 14px; }
+        .nav a { margin-right: 12px; color: #0066cc; text-decoration: none; }
+        .nav a:hover { text-decoration: underline; }
+        .nav a.active { font-weight: bold; }
+        .container { max-width: 900px; margin: 0 auto; padding: 20px; }
+        h1 { font-size: 22px; margin-top: 0; }
+        .intro { font-size: 13px; color: #333; background: #fafafa; border: 1px solid #e5e5e5;
+                 padding: 10px 12px; border-radius: 4px; margin-bottom: 16px; line-height: 1.5; }
+        table { border-collapse: collapse; width: 100%; font-size: 13px; }
+        th, td { border: 1px solid #ccc; padding: 8px 10px; text-align: left; }
+        th { background: #f5f5f5; }
+        td.num { text-align: center; font-variant-numeric: tabular-nums; }
+        td.site { font-weight: 500; }
+        a.rowlink { color: #0066cc; text-decoration: none; }
+        a.rowlink:hover { text-decoration: underline; }
+        .empty { color: #666; }
+        .err { color: #a00; }
+        .loading { color: #666; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="nav">
+            <a href="index.html">Full</a>
+            <a href="preselection.html">Pre-selection</a>
+            <a href="prepared.html">Prepared</a>
+            <a href="fusion.html">Fusion</a>
+            <a href="postprocessed.html">Postprocessed</a>
+            <a href="metrics.html">Metrics</a>
+            <a href="phenology.html" class="active">Phenology</a>
+        </div>
+        <h1>PhenoCam phenology (50% amplitude)</h1>
+        <p class="intro">
+            Green-up and green-down dates from <code>data/&lt;site&gt;/&lt;season&gt;/raw/phenocam/phenocam_phenology.json</code>
+            (TIMESAT on PhenoCam GCC). Site/season rows match <code>data/sites.geojson</code>.
+            Run <code>python phenology_timesat.py --all</code> or the pipeline to generate missing JSON files.
+        </p>
+        <p id="status" class="loading">Loading…</p>
+        <div id="tableWrap"></div>
+    </div>
+    <script>
+        function escapeHtml(s) {
+            return String(s)
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;");
+        }
+
+        function cellDate(v) {
+            if (v == null || v === "") return "<span class='empty'>—</span>";
+            return escapeHtml(v);
+        }
+
+        async function loadPhenologyRow(site, season) {
+            const path = `data/${site}/${season}/raw/phenocam/phenocam_phenology.json`;
+            try {
+                const res = await fetch(path);
+                if (!res.ok) return { ok: false, up: null, down: null };
+                const j = await res.json();
+                return {
+                    ok: true,
+                    up: j.green_up_50pct_date ?? null,
+                    down: j.green_down_50pct_date ?? null
+                };
+            } catch {
+                return { ok: false, up: null, down: null };
+            }
+        }
+
+        async function main() {
+            const status = document.getElementById("status");
+            const wrap = document.getElementById("tableWrap");
+            let features = [];
+            try {
+                const res = await fetch("data/sites.geojson");
+                if (!res.ok) throw new Error("Could not load sites.geojson");
+                const g = await res.json();
+                features = g.features || [];
+            } catch (e) {
+                status.textContent = "";
+                status.className = "err";
+                status.textContent = "Failed to load data/sites.geojson.";
+                return;
+            }
+
+            const rows = [];
+            for (const f of features) {
+                const site = f.properties && f.properties.sitename;
+                if (!site) continue;
+                const desc = (f.properties && f.properties.description) || site;
+                const seasons = f.properties && f.properties.seasons
+                    ? Object.keys(f.properties.seasons).sort()
+                    : [];
+                for (const season of seasons) {
+                    rows.push({ site, season, desc });
+                }
+            }
+            rows.sort((a, b) => a.site.localeCompare(b.site) || a.season.localeCompare(b.season));
+
+            const results = await Promise.all(
+                rows.map((r) =>
+                    loadPhenologyRow(r.site, r.season).then((phen) => ({ ...r, ...phen }))
+                )
+            );
+
+            const head =
+                "<thead><tr>" +
+                "<th>Site</th><th>Season</th><th>Description</th>" +
+                "<th>Green-up</th><th>Green-down</th>" +
+                "</tr></thead>";
+            const body = results
+                .map((r) => {
+                    const q = new URLSearchParams();
+                    q.set("site", r.site);
+                    q.set("season", r.season);
+                    const viewer = `index.html?${q.toString()}`;
+                    return (
+                        "<tr>" +
+                        `<td class="site"><a class="rowlink" href="${viewer}">${escapeHtml(r.site)}</a></td>` +
+                        `<td class="num">${r.season}</td>` +
+                        `<td>${escapeHtml(r.desc)}</td>` +
+                        `<td class="num">${cellDate(r.up)}</td>` +
+                        `<td class="num">${cellDate(r.down)}</td>` +
+                        "</tr>"
+                    );
+                })
+                .join("");
+
+            status.textContent = "";
+            status.className = "";
+            wrap.innerHTML = "<table>" + head + "<tbody>" + body + "</tbody></table>";
+        }
+
+        main();
+    </script>
+</body>
+</html>
