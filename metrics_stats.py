@@ -148,21 +148,46 @@ def calculate_phenocam_stats(phenocam_ts):
     }
 
 
-def _s2_kept_date_set(base: Path, strategy: str) -> set:
+def _s2_gcc_series_from_preselection(base: Path):
+    """Build the raw S2 GCC series from s2_preselection.json.
+
+    Uses the 3x3 site-window band means stored per raw S2 acquisition and
+    computes GCC = b03 / (b02 + b03 + b04). Scale cancels, so DN vs
+    reflectance is irrelevant. Returns (all_gcc, flags) where all_gcc maps
+    YYYY-MM-DD -> gcc for every row with a positive band sum, and flags maps
+    the same date key -> (excluded_aggressive, excluded_nonaggressive).
+    """
     path = base / "raw" / "preselection" / "s2_preselection.json"
     if not path.exists():
-        return set()
+        return {}, {}
     with open(path) as f:
         rows = json.load(f)
-    key = f"excluded_{strategy}"
-    out = set()
+    all_gcc: dict = {}
+    flags: dict = {}
     for e in rows:
-        if e.get(key):
-            continue
         nk = _norm_date_key(e.get("date"))
-        if nk:
-            out.add(nk)
-    return out
+        if not nk:
+            continue
+        try:
+            b02 = float(e.get("b02"))
+            b03 = float(e.get("b03"))
+            b04 = float(e.get("b04"))
+        except (TypeError, ValueError):
+            continue
+        total = b02 + b03 + b04
+        if not np.isfinite(total) or total <= 0:
+            continue
+        gcc = b03 / total
+        if not np.isfinite(gcc):
+            continue
+        if nk in all_gcc:
+            continue
+        all_gcc[nk] = float(gcc)
+        flags[nk] = (
+            bool(e.get("excluded_aggressive")),
+            bool(e.get("excluded_nonaggressive")),
+        )
+    return all_gcc, flags
 
 
 def _whittaker_smooth_dict(obs_dates, obs_values, lam: float, n_min: int = 3):
@@ -221,33 +246,27 @@ def calculate_all_metrics(season, site_name, site_position):
         results["phenocam_stats"] = phenocam_stats
 
     baseline = {}
-    s2_ts = {}
-    for sub in ("processed_aggressive_sigma20", "processed_nonaggressive_sigma20"):
-        p = base / sub / "gcc" / "s2" / "timeseries.json"
-        if p.exists():
-            s2_ts = load_timeseries(p)
-            if s2_ts:
-                break
-    if s2_ts:
-        m0 = calculate_temporal_metrics(s2_ts, phenocam_ts)
+    all_gcc, flags = _s2_gcc_series_from_preselection(base)
+    if all_gcc:
+        m0 = calculate_temporal_metrics(all_gcc, phenocam_ts)
         if m0:
             baseline["s2"] = m0
-        for strategy in ("aggressive", "nonaggressive"):
-            kept = _s2_kept_date_set(base, strategy)
-            filtered = [
-                (k, v)
-                for k, v in sorted(
-                    s2_ts.items(), key=lambda x: _norm_date_key(x[0]) or ""
-                )
-                if _norm_date_key(k) in kept and v is not None
-            ]
-            if not filtered:
+        for strategy, flag_idx in (("aggressive", 0), ("nonaggressive", 1)):
+            kept_items = sorted(
+                (
+                    (d, g)
+                    for d, g in all_gcc.items()
+                    if d in flags and not flags[d][flag_idx]
+                ),
+                key=lambda x: x[0],
+            )
+            if not kept_items:
                 continue
-            sub_ts = dict(filtered)
-            mcf = calculate_temporal_metrics(sub_ts, phenocam_ts)
+            kept_ts = dict(kept_items)
+            mcf = calculate_temporal_metrics(kept_ts, phenocam_ts)
             if mcf:
                 baseline.setdefault("s2_cloudfree", {})[strategy] = mcf
-            obs_d, obs_v = zip(*filtered)
+            obs_d, obs_v = zip(*kept_items)
             smooth = _whittaker_smooth_dict(obs_d, obs_v, WHITTAKER_LAMBDA_DAYS_SQ)
             if smooth:
                 mw = calculate_temporal_metrics(smooth, phenocam_ts)

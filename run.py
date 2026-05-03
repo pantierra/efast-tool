@@ -17,6 +17,7 @@ from preparation import (
 )
 from metrics_indices import create_prepared_fusion_timeseries
 from metrics_stats import calculate_all_metrics
+from phenology_timesat import write_phenocam_phenology_for_site
 
 
 def run_pipeline(season, site_position, site_name):
@@ -26,6 +27,9 @@ def run_pipeline(season, site_position, site_name):
         # download_s2(season, site_position, site_name)
         # download_s3(season, site_position, site_name)
         # download_phenocam(season, site_position, site_name)
+
+        print(f"PhenoCam phenology (50 % amplitude): {site_name}, {season}")
+        write_phenocam_phenology_for_site(site_name, season)
 
         print(f"Creating preselection timeseries: {site_name}, {season}")
         create_timeseries(season, site_position, site_name)

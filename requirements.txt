@@ -4,6 +4,7 @@ openeo
 python-dotenv
 netCDF4
 numpy
+timesat
 requests
 scipy
 matplotlib

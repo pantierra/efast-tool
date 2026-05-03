@@ -25,6 +25,7 @@
         .site-info h2 { margin: 0 0 20px 0; font-size: 18px; color: #666; }
         .phenocam-label { font-size: 12px; margin-bottom: 5px; color: #666; }
         .phenocam-date { font-size: 11px; margin-top: 5px; color: #999; }
+        .timeseries-phenology { font-size: 11px; color: #444; line-height: 1.45; margin-top: 6px; white-space: pre-line; }
         .phenocam-image { width: 100%; height: 200px; object-fit: contain; border: 1px solid #ccc; }
         .sitemap { height: 200px; border: 1px solid #ccc; margin-top: 32px; }
         #greennesstimeseries { margin-top: 0; }
@@ -54,6 +55,7 @@
             <a href="fusion.html">Fusion</a>
             <a href="postprocessed.html">Postprocessed</a>
             <a href="metrics.html">Metrics</a>
+            <a href="phenology.html">Phenology</a>
         </div>
         <div class="slider-container">
             <input type="range" id="dateSlider" min="0" max="365" value="0">
@@ -70,6 +72,7 @@
             <div class="header-col">
                 <div class="timeseries-label">Greenness Index Timeseries</div>
                 <canvas id="greennesstimeseries" class="timeseries"></canvas>
+                <div id="phenocamPhenology" class="timeseries-phenology"></div>
             </div>
             <div class="header-col">
                 <div id="sitemap" class="sitemap"></div>
@@ -172,6 +175,8 @@
         let timeseries = { s2: [], fusion: [], s3: [] };
         let greennessTimeseries = { s2: [], fusion: [], s3: [] };
         let phenocamGreennessTimeseries = [];
+        /** @type {{ green_up_50pct_date: string | null, green_down_50pct_date: string | null } | null} */
+        let phenocamPhenology = null;
         
         // Add site marker to all maps
         for (const source of ["s2", "fusion", "s3"]) {
@@ -180,6 +185,39 @@
         
         let syncing = false;
         const allMaps = Object.values(maps);
+        function updatePhenocamPhenologyText() {
+            const el = document.getElementById("phenocamPhenology");
+            if (!el) return;
+            if (!phenocamPhenology || (phenocamPhenology.green_up_50pct_date == null && phenocamPhenology.green_down_50pct_date == null)) {
+                el.textContent = "";
+                return;
+            }
+            const up = phenocamPhenology.green_up_50pct_date || "—";
+            const dn = phenocamPhenology.green_down_50pct_date || "—";
+            el.textContent = `* Green-up: ${up}\n* Green-down: ${dn}`;
+        }
+
+        const PHENOLOGY_VLINE = "rgba(150, 200, 255, 0.95)";
+
+        function strokePhenologyVlines(ctx, minDate, maxDate, dateRange, plotW, pad, plotH) {
+            if (!phenocamPhenology) return;
+            for (const iso of [phenocamPhenology.green_up_50pct_date, phenocamPhenology.green_down_50pct_date]) {
+                if (!iso) continue;
+                const d = new Date(iso);
+                if (isNaN(d.getTime()) || d < minDate || d > maxDate) continue;
+                const px = pad + ((d - minDate) / dateRange) * plotW;
+                ctx.save();
+                ctx.setLineDash([4, 3]);
+                ctx.strokeStyle = PHENOLOGY_VLINE;
+                ctx.lineWidth = 1.5;
+                ctx.beginPath();
+                ctx.moveTo(px, pad);
+                ctx.lineTo(px, pad + plotH);
+                ctx.stroke();
+                ctx.restore();
+            }
+        }
+
         const syncMaps = (sourceMap) => {
             if (syncing) return;
             syncing = true;
@@ -197,18 +235,21 @@
         async function loadTimeseries() {
             metricsData = null;
             const fusionPath = getFusionPath();
-            const [s2, fusion, s3, s2gcc, fusiongcc, s3gcc, phenocam] = await Promise.all([
+            const [s2, fusion, s3, s2gcc, fusiongcc, s3gcc, phenocam, phenPhen] = await Promise.all([
                 fetch(`data/${siteName}/${season}/processed_${strategy}_sigma${sigma}/ndvi/s2/timeseries.json`).then(r => r.json()).catch(() => []),
                 fetch(`data/${siteName}/${season}/${fusionPath}/ndvi/fusion/timeseries.json`).then(r => r.json()).catch(() => []),
                 fetch(`data/${siteName}/${season}/processed_${strategy}_sigma${sigma}/ndvi/s3/timeseries.json`).then(r => r.json()).catch(() => []),
                 fetch(`data/${siteName}/${season}/processed_${strategy}_sigma${sigma}/gcc/s2/timeseries.json`).then(r => r.json()).catch(() => []),
                 fetch(`data/${siteName}/${season}/${fusionPath}/gcc/fusion/timeseries.json`).then(r => r.json()).catch(() => []),
                 fetch(`data/${siteName}/${season}/processed_${strategy}_sigma${sigma}/gcc/s3/timeseries.json`).then(r => r.json()).catch(() => []),
-                fetch(`data/${siteName}/${season}/raw/phenocam/phenocam_gcc.json`).then(r => r.json()).catch(() => [])
+                fetch(`data/${siteName}/${season}/raw/phenocam/phenocam_gcc.json`).then(r => r.json()).catch(() => []),
+                fetch(`data/${siteName}/${season}/raw/phenocam/phenocam_phenology.json`).then(r => r.ok ? r.json() : null).catch(() => null)
             ]);
             timeseries = { s2, fusion, s3 };
             greennessTimeseries = { s2: s2gcc, fusion: fusiongcc, s3: s3gcc };
             phenocamGreennessTimeseries = phenocam;
+            phenocamPhenology = phenPhen && (phenPhen.green_up_50pct_date != null || phenPhen.green_down_50pct_date != null) ? phenPhen : null;
+            updatePhenocamPhenologyText();
             
             // Load all scenario GCC timeseries for comparison
             const scenarios = [
@@ -289,10 +330,11 @@
                 ctx.fillStyle = "#888";
                 const axisY = pad + plotH;
                 for (const t of data) ctx.fillRect(x(t.date) - 1, axisY - 1, 2, 2);
-                
+                strokePhenologyVlines(ctx, minDate, maxDate, dateRange, plotW, pad, plotH);
                 const xPos = x(currentDate);
                 ctx.strokeStyle = "#f00";
                 ctx.lineWidth = 2;
+                ctx.setLineDash([]);
                 ctx.beginPath();
                 ctx.moveTo(xPos, pad);
                 ctx.lineTo(xPos, pad + plotH);
@@ -360,11 +402,12 @@
             ctx.fillStyle = "#888";
             const axisY = pad + plotH;
             for (const t of data) ctx.fillRect(x(t.date) - 1, axisY - 1, 2, 2);
-            
+            strokePhenologyVlines(ctx, minDate, maxDate, dateRange, plotW, pad, plotH);
             const currentDate = dateFromDays(parseInt(slider.value));
             const xPos = x(currentDate);
             ctx.strokeStyle = "#f00";
             ctx.lineWidth = 2;
+            ctx.setLineDash([]);
             ctx.beginPath();
             ctx.moveTo(xPos, pad);
             ctx.lineTo(xPos, pad + plotH);
@@ -460,17 +503,17 @@
             ctx.fillStyle = "#888";
             const axisY = pad + plotH;
             for (const t of [...s2data, ...fusiondata, ...phenocamdata]) ctx.fillRect(x(t.date) - 1, axisY - 1, 2, 2);
-            
+            strokePhenologyVlines(ctx, minDate, maxDate, dateRange, plotW, pad, plotH);
             const legendX = pad + plotW - 80, legendY = pad + 5;
             ctx.font = "9px sans-serif";
             if (s2data.length) { ctx.strokeStyle = "#ff6600"; ctx.beginPath(); ctx.moveTo(legendX, legendY); ctx.lineTo(legendX + 15, legendY); ctx.stroke(); ctx.fillStyle = "#000"; ctx.fillText("S2", legendX + 18, legendY + 3); }
             if (fusiondata.length) { ctx.strokeStyle = "#9900cc"; ctx.beginPath(); ctx.moveTo(legendX, legendY + 12); ctx.lineTo(legendX + 15, legendY + 12); ctx.stroke(); ctx.fillStyle = "#000"; ctx.fillText("Fusion", legendX + 18, legendY + 15); }
             if (phenocamdata.length) { ctx.strokeStyle = "#00aa00"; ctx.beginPath(); ctx.moveTo(legendX, legendY + 24); ctx.lineTo(legendX + 15, legendY + 24); ctx.stroke(); ctx.fillStyle = "#000"; ctx.fillText("PhenoCam", legendX + 18, legendY + 27); }
-            
             const currentDate = dateFromDays(parseInt(slider.value));
             const xPos = x(currentDate);
             ctx.strokeStyle = "#f00";
             ctx.lineWidth = 2;
+            ctx.setLineDash([]);
             ctx.beginPath();
             ctx.moveTo(xPos, pad);
             ctx.lineTo(xPos, pad + plotH);
@@ -545,6 +588,7 @@
                     ctx.fillText(name, legendX + 18, legendY + i * 12 + 3);
                 }
             });
+            strokePhenologyVlines(ctx, minDate, maxDate, dateRange, plotW, pad, plotH);
         }
         
         function drawMetricsTable() {
