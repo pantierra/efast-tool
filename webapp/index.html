@@ -134,7 +134,10 @@
             <canvas id="scenariosgcctimeseries" class="combined-plot-canvas"></canvas>
         </div>
         <div class="combined-plot">
-            <div class="combined-plot-label">Metrics Comparison: All Scenarios</div>
+            <div class="combined-plot-label">Metrics vs PhenoCam (fusion scenarios)</div>
+            <p style="margin:4px 0 8px; font-size:11px; color:#555; max-width:720px;">
+                R² (variance explained), nRMSE (RMSE normalised by PhenoCam σ), NSE_PC (Nash–Sutcliffe vs PhenoCam). Other metrics remain in <code>metrics.json</code>.
+            </p>
             <div id="metricsTable" style="overflow-x: auto; margin-top: 10px;"></div>
         </div>
     </div>
@@ -605,8 +608,8 @@
             
             const scenarios = ["aggressive_sigma20", "aggressive_sigma30", "nonaggressive_sigma20", "nonaggressive_sigma30"];
             const scenarioNames = ["Aggressive σ20", "Aggressive σ30", "Non-aggressive σ20", "Non-aggressive σ30"];
-            const metrics = ["pearson_r", "r_squared", "rmse", "mae", "nrmse", "nse_pc"];
-            const metricLabels = { pearson_r: "r", r_squared: "R²", rmse: "RMSE", mae: "MAE", nrmse: "nRMSE", nse_pc: "NSE_PC" };
+            const metrics = ["r_squared", "nrmse", "nse_pc"];
+            const metricLabels = { r_squared: "R²", nrmse: "nRMSE", nse_pc: "NSE_PC" };
             
             let html = "<table style='width:100%; border-collapse:collapse; font-size:11px;'>";
             html += "<thead><tr style='background:#f5f5f5; border-bottom:2px solid #ccc;'>";
@@ -621,7 +624,12 @@
                 html += `<td style='padding:6px 8px; font-weight:600;'>S2 (baseline)</td>`;
                 metrics.forEach(m => {
                     const val = m === "nse_pc" ? (data.nse_pc ?? data.nse) : data[m];
-                    const fmt = val !== null && val !== undefined ? (m === "pearson_r" || m === "r_squared" || m === "nse_pc" ? val.toFixed(3) : val.toFixed(4)) : "—";
+                    const fmt =
+                        val !== null && val !== undefined
+                            ? m === "nrmse"
+                                ? val.toFixed(4)
+                                : val.toFixed(3)
+                            : "—";
                     html += `<td style='padding:6px 8px; text-align:right; font-family:monospace;'>${fmt}</td>`;
                 });
                 html += "</tr>";
@@ -635,7 +643,12 @@
                 html += `<td style='padding:6px 8px; font-weight:500;'>${scenarioNames[i]}</td>`;
                 metrics.forEach(m => {
                     const val = m === "nse_pc" ? (data.nse_pc ?? data.nse) : data[m];
-                    const fmt = val !== null && val !== undefined ? (m === "pearson_r" || m === "r_squared" || m === "nse_pc" ? val.toFixed(3) : val.toFixed(4)) : "—";
+                    const fmt =
+                        val !== null && val !== undefined
+                            ? m === "nrmse"
+                                ? val.toFixed(4)
+                                : val.toFixed(3)
+                            : "—";
                     html += `<td style='padding:6px 8px; text-align:right; font-family:monospace;'>${fmt}</td>`;
                 });
                 html += "</tr>";
@@ -646,7 +659,7 @@
             // Add phenocam stats info if available
             if (metricsData.phenocam_stats) {
                 const stats = metricsData.phenocam_stats;
-                html += `<p style='margin-top:10px; font-size:10px; color:#666;'>PhenoCam stats: mean=${stats.mean.toFixed(3)}, std=${stats.std.toFixed(3)}, n=${stats.n_samples}</p>`;
+                html += `<p style='margin-top:10px; font-size:10px; color:#666;'>PhenoCam GCC samples (ground truth): n = ${stats.n_samples}</p>`;
             }
             
             container.innerHTML = html;

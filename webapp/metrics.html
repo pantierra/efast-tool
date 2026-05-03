@@ -18,7 +18,6 @@
         th, td { border: 1px solid #ccc; padding: 6px 8px; text-align: left; }
         th { background: #f5f5f5; }
         td.num { text-align: right; font-variant-numeric: tabular-nums; }
-        .compare-note { font-size: 12px; color: #555; margin: 0 0 8px 0; max-width: 720px; }
         .section-note { font-size: 12px; color: #555; margin: -6px 0 8px 0; max-width: 720px; line-height: 1.45; }
         .section-note code { background: #f1f1f1; padding: 1px 4px; border-radius: 3px; font-size: 11px; }
         .intro { font-size: 13px; color: #333; background: #fafafa; border: 1px solid #e5e5e5;
@@ -50,9 +49,21 @@
         <div id="content"></div>
     </div>
     <script>
-        const METRIC_COLS = ["pearson_r", "r_squared", "rmse", "mae", "nrmse", "nse_pc", "n_samples"];
+        /** Shown in the UI; pearson_r, rmse, mae, n_samples remain in metrics.json only. */
+        const DISPLAY_METRIC_COLS = ["r_squared", "nrmse", "nse_pc"];
+        const DISPLAY_METRIC_LABELS = {
+            r_squared: "R²",
+            nrmse: "nRMSE",
+            nse_pc: "NSE_PC",
+        };
         function mv(m, c) {
             return c === "nse_pc" ? (m.nse_pc ?? m.nse) : m[c];
+        }
+        function fmtMetric(col, v) {
+            if (v == null || typeof v !== "number") return "—";
+            if (col === "r_squared" || col === "nse_pc") return v.toFixed(3);
+            if (col === "nrmse") return v.toFixed(4);
+            return fmt(v);
         }
         let siteName = "innsbruck", season = "2024";
         let availableSiteSeasons = {};
@@ -76,60 +87,12 @@
                 return `${heading}<p class="empty">No data</p>`;
             }
             const keys = Object.keys(obj).sort();
-            let head = `<tr><th>Scenario</th>${METRIC_COLS.map((c) => `<th>${c}</th>`).join("")}</tr>`;
+            let head = `<tr><th>Scenario</th>${DISPLAY_METRIC_COLS.map((c) => `<th>${DISPLAY_METRIC_LABELS[c]}</th>`).join("")}</tr>`;
             const rows = keys.map((k) => {
                 const m = obj[k] || {};
-                return `<tr><td>${k}</td>${METRIC_COLS.map((c) => `<td class="num">${fmt(mv(m, c))}</td>`).join("")}</tr>`;
+                return `<tr><td>${k}</td>${DISPLAY_METRIC_COLS.map((c) => `<td class="num">${fmtMetric(c, mv(m, c))}</td>`).join("")}</tr>`;
             }).join("");
             return `${heading}<table>${head}${rows}</table>`;
-        }
-
-        /** Pair BtI keys (`aggressive_sigma20`) with ItB (`aggressive_sigma20_itb`). */
-        function btiItbPairs(obj) {
-            if (!obj || typeof obj !== "object") return [];
-            const pairs = [];
-            for (const itbKey of Object.keys(obj)) {
-                if (!itbKey.endsWith("_itb")) continue;
-                const btiKey = itbKey.slice(0, -"_itb".length);
-                const bti = obj[btiKey];
-                const itb = obj[itbKey];
-                if (!bti || !itb) continue;
-                pairs.push({ label: btiKey, bti, itb });
-            }
-            pairs.sort((a, b) => a.label.localeCompare(b.label));
-            return pairs;
-        }
-
-        function fmtDelta(btiM, itbM, col) {
-            const a = mv(btiM, col);
-            const b = mv(itbM, col);
-            if (a == null || b == null || typeof a !== "number" || typeof b !== "number") return "—";
-            return fmt(b - a);
-        }
-
-        function btiItbCompareSection(title, obj, blurb, metricCols = METRIC_COLS) {
-            const pairs = btiItbPairs(obj);
-            if (!pairs.length) return "";
-            const subHead = metricCols.map(
-                () => `<th class="num">BtI</th><th class="num">ItB</th><th class="num">Δ</th>`
-            ).join("");
-            const head =
-                `<tr><th rowspan="2">Scenario</th>${metricCols.map((c) => `<th colspan="3">${c}</th>`).join("")}</tr>` +
-                `<tr>${subHead}</tr>`;
-            const rows = pairs
-                .map((p) => {
-                    const cells = metricCols.map((c) => {
-                        const vB = fmt(mv(p.bti, c));
-                        const vI = fmt(mv(p.itb, c));
-                        const d = fmtDelta(p.bti, p.itb, c);
-                        return `<td class="num">${vB}</td><td class="num">${vI}</td><td class="num">${d}</td>`;
-                    }).join("");
-                    return `<tr><td>${p.label}</td>${cells}</tr>`;
-                })
-                .join("");
-            const heading = title ? `<h2>${title}</h2>` : "";
-            const note = blurb ? `<p class="compare-note">${blurb}</p>` : "";
-            return `${heading}${note}<table>${head}${rows}</table>`;
         }
 
         function baselineSection(b) {
@@ -137,7 +100,9 @@
             const rows = [];
             const pushRow = (label, m) => {
                 if (!m || typeof m !== "object") return;
-                rows.push(`<tr><td>${label}</td>${METRIC_COLS.map((c) => `<td class="num">${fmt(mv(m, c))}</td>`).join("")}</tr>`);
+                rows.push(
+                    `<tr><td>${label}</td>${DISPLAY_METRIC_COLS.map((c) => `<td class="num">${fmtMetric(c, mv(m, c))}</td>`).join("")}</tr>`
+                );
             };
             pushRow("S2 GCC (all acquisitions)", b.s2);
             for (const strat of ["aggressive", "nonaggressive"]) {
@@ -146,7 +111,7 @@
                 pushRow(`S2 Whittaker λ=400 (${strat})`, b.s2_whittaker_lambda400?.[strat]);
             }
             if (!rows.length) return "";
-            const head = `<tr><th>Baseline</th>${METRIC_COLS.map((c) => `<th>${c}</th>`).join("")}</tr>`;
+            const head = `<tr><th>Baseline</th>${DISPLAY_METRIC_COLS.map((c) => `<th>${DISPLAY_METRIC_LABELS[c]}</th>`).join("")}</tr>`;
             return `<h2>Baselines (temporal vs PhenoCam)</h2><table>${head}${rows.join("")}</table>`;
         }
 
@@ -166,6 +131,8 @@
                         <li><b>ItB</b> (<i>Index-then-Bands</i>): compute GCC from S2 and S3 first, then fuse the GCC rasters.</li>
                         <li>Scenarios combine a cloud-screening <b>strategy</b> (<code>aggressive</code> / <code>nonaggressive</code>)
                             and an EFAST fusion <b>σ</b> (<code>sigma20</code> / <code>sigma30</code>).</li>
+                        <li>Tables list <b>R²</b> (fit vs PhenoCam), <b>nRMSE</b> (RMSE normalised by PhenoCam variability),
+                            and <b>NSE_PC</b> (Nash–Sutcliffe using PhenoCam as reference). Pearson <i>r</i>, RMSE, MAE, and sample counts stay in <code>metrics.json</code>.</li>
                     </ul>
                 </div>`;
             if (data.phenocam_stats) {
@@ -181,9 +148,6 @@
                 html += `<p class="section-note">Reference GCC series <i>before</i> any fusion: raw S2 (all dates and cloud-screened per strategy), S3 composite per strategy, and a Whittaker-smoothed S2 series (λ=400). Useful to see what fusion has to beat.</p>`;
                 html += baselineHtml.replace(/^<h2>[^<]*<\/h2>/, "");
             }
-            html += `<h2>Temporal: BtI vs ItB (paired)</h2>`;
-            html += `<p class="section-note">Per scenario (same strategy + σ), BtI and ItB side-by-side with <b>Δ = ItB − BtI</b>. Positive Δ is better for Pearson r, R², and NSE; negative Δ is better for RMSE, MAE, and NRMSE.</p>`;
-            html += btiItbCompareSection("", data.temporal, "") || `<p class="empty">No paired scenarios</p>`;
             html += `<h2>Temporal (vs PhenoCam)</h2>`;
             html += `<p class="section-note">Per-scenario agreement between the fusion GCC <b>timeseries</b> at the site 3×3 window and the PhenoCam GCC timeseries, across all matched dates. Scenarios ending in <code>_itb</code> are Index-then-Bands; the others are Bands-then-Index.</p>`;
             html += tableSection("", data.temporal);
