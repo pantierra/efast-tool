@@ -110,6 +110,25 @@ def nse(y_true, y_pred):
     return float(1 - (numerator / denominator))
 
 
+def residual_vs_phenocam(fusion_ts, phenocam_ts):
+    """Stats of (fused_GCC − PhenoCam_GCC) on matched dates; None if too few points.
+
+    Mean: positive → fusion systematically above PhenoCam; negative → below; ~0 → unbiased mean.
+    Compare BtI vs ItB means at same strategy/σ (``derived.bti_vs_itb_mean_residual``): closer to 0 → less mean bias vs PhenoCam.
+    """
+    yf, yp, _dates = match_dates(fusion_ts, phenocam_ts)
+    if len(yf) < 2:
+        return None
+    r = yf - yp
+    return {
+        "mean": float(np.mean(r)),
+        "std": float(np.std(r)),
+        "mae": float(np.mean(np.abs(r))),
+        "rmse": float(np.sqrt(np.mean(r**2))),
+        "n_samples": int(len(r)),
+    }
+
+
 def calculate_temporal_metrics(fusion_ts, phenocam_ts):
     """Temporal metrics vs PhenoCam (nse_pc; nse is the same value)."""
     fusion_vals, phenocam_vals, dates = match_dates(fusion_ts, phenocam_ts)
@@ -129,7 +148,52 @@ def calculate_temporal_metrics(fusion_ts, phenocam_ts):
         "n_samples": len(fusion_vals),
         "date_range": {"start": dates[0], "end": dates[-1]} if dates else None,
     }
+    rv = residual_vs_phenocam(fusion_ts, phenocam_ts)
+    if rv:
+        metrics["residual_vs_phenocam"] = rv
     return metrics
+
+
+def derived_tier1(temporal: dict) -> dict:
+    """ΔNSE_PC (σ20 − σ30) and paired BtI vs ItB mean residual; needs temporal fusion keys.
+
+    ΔNSE_PC > 0 → NSE_PC higher at σ=20 than σ=30 (tighter EFAST temporal kernel wins).
+    ΔNSE_PC < 0 → σ=30 wins (broader smoothing matches PhenoCam better).
+    """
+    d_nse = {"bti": {}, "itb": {}}
+    for strategy in ("aggressive", "nonaggressive"):
+        for mode, suf in (("bti", ""), ("itb", "_itb")):
+            k20 = f"{strategy}_sigma20{suf}"
+            k30 = f"{strategy}_sigma30{suf}"
+            n20 = (temporal.get(k20) or {}).get("nse_pc")
+            n30 = (temporal.get(k30) or {}).get("nse_pc")
+            if isinstance(n20, (int, float)) and isinstance(n30, (int, float)):
+                d_nse[mode][strategy] = float(n20 - n30)
+            else:
+                d_nse[mode][strategy] = None
+
+    paired = []
+    for strategy in ("aggressive", "nonaggressive"):
+        for sig in (20, 30):
+            kb, ki = f"{strategy}_sigma{sig}", f"{strategy}_sigma{sig}_itb"
+            mb = (temporal.get(kb) or {}).get("residual_vs_phenocam", {}).get("mean")
+            mi = (temporal.get(ki) or {}).get("residual_vs_phenocam", {}).get("mean")
+            paired.append(
+                {
+                    "strategy": strategy,
+                    "sigma": sig,
+                    "mean_residual_bti": float(mb)
+                    if isinstance(mb, (int, float))
+                    else None,
+                    "mean_residual_itb": float(mi)
+                    if isinstance(mi, (int, float))
+                    else None,
+                }
+            )
+    return {
+        "delta_nse_pc_sigma20_minus_sigma30": d_nse,
+        "bti_vs_itb_mean_residual": paired,
+    }
 
 
 def calculate_phenocam_stats(phenocam_ts):
@@ -322,6 +386,9 @@ def calculate_all_metrics(season, site_name, site_position):
             temporal_metrics = calculate_temporal_metrics(fusion_ts, phenocam_ts)
             if temporal_metrics:
                 results["temporal"][scenario_name] = temporal_metrics
+
+    if results["temporal"]:
+        results["derived"] = derived_tier1(results["temporal"])
 
     # Save results
     output_path = Path(f"data/{site_name}/{season}/metrics.json")

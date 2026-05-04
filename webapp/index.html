@@ -136,7 +136,7 @@
         <div class="combined-plot">
             <div class="combined-plot-label">Metrics vs PhenoCam (fusion scenarios)</div>
             <p style="margin:4px 0 8px; font-size:11px; color:#555; max-width:720px;">
-                R² (variance explained), nRMSE (RMSE normalised by PhenoCam σ), NSE_PC (Nash–Sutcliffe vs PhenoCam). Other metrics remain in <code>metrics.json</code>.
+                R² (variance explained), nRMSE (RMSE normalised by PhenoCam σ), NSE_PC (Nash–Sutcliffe vs PhenoCam). <b>ΔNSE_PC</b> = NSE_PC(σ20)−NSE_PC(σ30): positive → σ20 better; negative → σ30 better. <b>Mean residual</b> (fused−PhenoCam): positive → fusion high vs PhenoCam on average; negative → low; compare BtI vs ItB in the same row (closer to 0 = less mean bias). Tables at the top when <code>metrics.json</code> has <code>derived</code> (regenerate with <code>metrics_stats.py</code> / <code>run.py</code>).
             </p>
             <div id="metricsTable" style="overflow-x: auto; margin-top: 10px;"></div>
         </div>
@@ -605,13 +605,58 @@
                 container.innerHTML = "<p style='color:#666; font-size:12px;'>Metrics not available. Run the pipeline (run.py) or metrics_stats.py to generate.</p>";
                 return;
             }
-            
+
+            const fmtD = (v) => {
+                const n = Number(v);
+                return Number.isFinite(n) ? n.toFixed(3) : "—";
+            };
+            const d = metricsData.derived;
+            let html = "";
+            if (d && d.delta_nse_pc_sigma20_minus_sigma30) {
+                const dn = d.delta_nse_pc_sigma20_minus_sigma30;
+                let anyDelta = false;
+                for (const mode of ["bti", "itb"]) {
+                    for (const strat of ["aggressive", "nonaggressive"]) {
+                        if (Number.isFinite(Number(dn[mode]?.[strat]))) anyDelta = true;
+                    }
+                }
+                html +=
+                    "<p style='margin:0 0 2px; font-size:11px; font-weight:600;'>ΔNSE_PC (σ20 − σ30)</p>";
+                html +=
+                    "<p style='margin:0 0 6px; font-size:10px; color:#555; line-height:1.35;'>NSE_PC(σ20) − NSE_PC(σ30): <b>+</b> → σ20 better, <b>−</b> → σ30 better.</p>";
+                html +=
+                    "<table style='width:100%; border-collapse:collapse; font-size:11px; margin-bottom:10px;'><thead><tr style='background:#f5f5f5;'><th style='padding:6px; text-align:left;'>Mode</th><th style='padding:6px; text-align:left;'>Strategy</th><th style='padding:6px; text-align:right;'>ΔNSE_PC</th></tr></thead><tbody>";
+                for (const mode of ["bti", "itb"]) {
+                    for (const strat of ["aggressive", "nonaggressive"]) {
+                        const v = dn[mode]?.[strat];
+                        html += `<tr style='border-bottom:1px solid #eee;'><td style='padding:6px;'>${mode.toUpperCase()}</td><td style='padding:6px;'>${strat}</td><td style='padding:6px; text-align:right; font-family:monospace;'>${fmtD(v)}</td></tr>`;
+                    }
+                }
+                html += "</tbody></table>";
+                if (!anyDelta) {
+                    html +=
+                        "<p style='margin:-4px 0 10px; font-size:10px; color:#666;'>ΔNSE_PC needs both σ20 and σ30 rows in temporal (BtI and ItB) with nse_pc.</p>";
+                }
+            }
+            if (d && d.bti_vs_itb_mean_residual && d.bti_vs_itb_mean_residual.length) {
+                html +=
+                    "<p style='margin:0 0 2px; font-size:11px; font-weight:600;'>Mean residual (fused − PhenoCam): BtI vs ItB</p>";
+                html +=
+                    "<p style='margin:0 0 6px; font-size:10px; color:#555; line-height:1.35;'>Each cell: mean(fused−PhenoCam) on matched dates. <b>+</b> overestimates, <b>−</b> underestimates; <b>~0</b> little mean bias (see R²/MAE for overall fit). Same row: column closer to 0 → less systematic offset vs PhenoCam (RQ1.1).</p>";
+                html +=
+                    "<table style='width:100%; border-collapse:collapse; font-size:11px; margin-bottom:10px;'><thead><tr style='background:#f5f5f5;'><th style='padding:6px;'>Strategy</th><th style='padding:6px;'>σ</th><th style='padding:6px; text-align:right;'>BtI</th><th style='padding:6px; text-align:right;'>ItB</th></tr></thead><tbody>";
+                for (const row of d.bti_vs_itb_mean_residual) {
+                    html += `<tr style='border-bottom:1px solid #eee;'><td style='padding:6px;'>${row.strategy}</td><td style='padding:6px;'>${row.sigma}</td><td style='padding:6px; text-align:right; font-family:monospace;'>${fmtD(row.mean_residual_bti)}</td><td style='padding:6px; text-align:right; font-family:monospace;'>${fmtD(row.mean_residual_itb)}</td></tr>`;
+                }
+                html += "</tbody></table>";
+            }
+
             const scenarios = ["aggressive_sigma20", "aggressive_sigma30", "nonaggressive_sigma20", "nonaggressive_sigma30"];
             const scenarioNames = ["Aggressive σ20", "Aggressive σ30", "Non-aggressive σ20", "Non-aggressive σ30"];
             const metrics = ["r_squared", "nrmse", "nse_pc"];
             const metricLabels = { r_squared: "R²", nrmse: "nRMSE", nse_pc: "NSE_PC" };
-            
-            let html = "<table style='width:100%; border-collapse:collapse; font-size:11px;'>";
+
+            html += "<table style='width:100%; border-collapse:collapse; font-size:11px;'>";
             html += "<thead><tr style='background:#f5f5f5; border-bottom:2px solid #ccc;'>";
             html += "<th style='padding:8px; text-align:left;'>Scenario</th>";
             metrics.forEach(m => html += `<th style='padding:8px; text-align:right;'>${metricLabels[m]}</th>`);
@@ -655,13 +700,13 @@
             });
             
             html += "</tbody></table>";
-            
+
             // Add phenocam stats info if available
             if (metricsData.phenocam_stats) {
                 const stats = metricsData.phenocam_stats;
                 html += `<p style='margin-top:10px; font-size:10px; color:#666;'>PhenoCam GCC samples (ground truth): n = ${stats.n_samples}</p>`;
             }
-            
+
             container.innerHTML = html;
         }
         
