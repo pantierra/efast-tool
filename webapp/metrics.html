@@ -55,6 +55,7 @@
             <a href="fusion.html">Fusion</a>
             <a href="postprocessed.html">Postprocessed</a>
             <a href="metrics.html" class="active">Metrics</a>
+            <a href="gap_validation.html">Gap validation</a>
             <a href="phenology.html">Phenology</a>
         </div>
         <h1 id="siteName">Metrics</h1>
@@ -70,7 +71,7 @@
         /** Shown in the UI; pearson_r, rmse, mae, n_samples remain in metrics.json only. */
         const DISPLAY_METRIC_COLS = ["r_squared", "nrmse", "nse_pc"];
         const DISPLAY_METRIC_LABELS = {
-            r_squared: "R²",
+            r_squared: "R² vs mean",
             nrmse: "nRMSE",
             nse_pc: "NSE_PC",
         };
@@ -229,9 +230,9 @@
                 <summary>How to read</summary>
                 <ol>
                     <li>All scores are satellite or fusion <b>GCC</b> vs <b>PhenoCam GCC</b> at the site 3×3 window, <b>same calendar days</b> only. Extra stats: <code>metrics.json</code>.</li>
-                    <li><b>R²</b>, <b>NSE_PC</b>: higher = better. <b>nRMSE</b>: lower = better.</li>
+                    <li><b>R² vs mean</b> and <b>NSE_PC</b> are the same value (1 − SS<sub>res</sub>/SS<sub>tot</sub> vs predicting mean PhenoCam each day); not (Pearson <i>r</i>)²; can be negative. Higher = better. <b>nRMSE</b>: lower = better.</li>
                     <li><b>Fusion:</b> same row number in BtI and in ItB = same screening + same σ — compare left/right. Down one block = change screening or σ.</li>
-                    <li><b>Mean resid.</b> (if present): mean(fused − PhenoCam). Sign = average bias; use R² / nRMSE / NSE_PC for overall fit.</li>
+                    <li><b>Mean resid.</b> (if present): mean(fused − PhenoCam). Sign = average bias; use R² vs mean / nRMSE / NSE_PC for overall fit.</li>
                     <li><b>Summaries:</b> ΔNSE_PC = NSE at σ20 minus NSE at σ30 (+ means σ20 wins). Paired table: closer to 0 = less mean bias.</li>
                 </ol>
             </details>`;
@@ -245,6 +246,7 @@
                     <li><b>ItB</b>: GCC on S2 and S3, then fuse GCC.</li>
                     <li><b>Scenario</b>: screening (<code>aggressive</code> / <code>nonaggressive</code>) × σ (20 / 30 days).</li>
                     <li><a href="phenology.html">Phenology</a> — PhenoCam SOS/EOS (TIMESAT).</li>
+                    <li><b>R² vs mean</b> — coefficient of determination vs a constant mean(PhenoCam) baseline; JSON key <code>r_squared</code>; duplicates <code>nse_pc</code>. Not (Pearson <i>r</i>)².</li>
                     <li><code>metrics.json</code> — also Pearson <i>r</i>, RMSE, MAE, <code>n_samples</code>.</li>
                 </ul>
             </details>`;
@@ -274,7 +276,7 @@
             const baselineTbl = baselineTable(data.baseline);
             if (baselineTbl) {
                 html += `<h2>Baselines (vs PhenoCam)</h2>`;
-                html += `<p class="section-note">Same columns as fusion (vs PhenoCam). Higher R² / NSE_PC, lower nRMSE = better. S3 = coarse-only; Whittaker = smoothed S2-only.</p>`;
+                html += `<p class="section-note">Same columns as fusion (vs PhenoCam). Higher R² vs mean / NSE_PC, lower nRMSE = better. S3 = coarse-only; Whittaker = smoothed S2-only.</p>`;
                 html += baselineTbl;
             }
 

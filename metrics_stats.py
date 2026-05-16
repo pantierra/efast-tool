@@ -64,7 +64,7 @@ def pearson_correlation(y_true, y_pred):
 
 
 def r_squared(y_true, y_pred):
-    """Calculate coefficient of determination R²."""
+    """Generalized R² vs predicting mean(y_true); can be negative. Same formula as ``nse`` with the same arguments; not Pearson r squared."""
     if len(y_true) < 2 or np.std(y_true) == 0:
         return None
     ss_res = np.sum((y_true - y_pred) ** 2)

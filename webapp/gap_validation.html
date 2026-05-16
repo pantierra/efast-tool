@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Gap validation</title>
+    <style>
+        body { margin: 0; font-family: sans-serif; }
+        .nav { margin-bottom: 15px; font-size: 14px; }
+        .nav a { margin-right: 12px; color: #0066cc; text-decoration: none; }
+        .nav a:hover { text-decoration: underline; }
+        .nav a.active { font-weight: bold; }
+        .container { max-width: 1100px; margin: 0 auto; padding: 20px; }
+        .selectors { margin-bottom: 18px; }
+        .selectors select { padding: 5px 10px; font-size: 14px; margin-right: 15px; }
+        h1 { font-size: 22px; margin-top: 0; }
+        h2 { font-size: 16px; margin-top: 22px; color: #333; }
+        h2:first-of-type { margin-top: 8px; }
+        table { border-collapse: collapse; width: 100%; font-size: 12px; margin-bottom: 14px; }
+        th, td { border: 1px solid #ccc; padding: 6px 8px; text-align: left; vertical-align: top; }
+        th { background: #f5f5f5; }
+        td.num { text-align: right; font-variant-numeric: tabular-nums; }
+        td.paths { font-size: 11px; word-break: break-all; color: #444; max-width: 420px; }
+        .intro { font-size: 13px; color: #333; background: #fafafa; border: 1px solid #e5e5e5;
+                 padding: 10px 12px; border-radius: 4px; margin-bottom: 16px; line-height: 1.5; }
+        .intro code { background: #f1f1f1; padding: 1px 4px; border-radius: 3px; font-size: 11px; }
+        .section-note { font-size: 12px; color: #555; margin: -6px 0 8px 0; line-height: 1.45; }
+        .empty { color: #666; font-style: italic; }
+        .err { color: #a00; }
+        details.meta { font-size: 12px; margin-top: 12px; border: 1px solid #e5e5e5; border-radius: 4px; padding: 8px 12px; background: #fafafa; }
+        details.meta summary { cursor: pointer; font-weight: 600; }
+        details.meta pre { margin: 8px 0 0; overflow: auto; font-size: 11px; max-height: 200px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="nav">
+            <a href="index.html">Full</a>
+            <a href="preselection.html">Pre-selection</a>
+            <a href="prepared.html">Prepared</a>
+            <a href="fusion.html">Fusion</a>
+            <a href="postprocessed.html">Postprocessed</a>
+            <a href="metrics.html">Metrics</a>
+            <a href="gap_validation.html" class="active">Gap validation</a>
+            <a href="phenology.html">Phenology</a>
+        </div>
+        <h1 id="pageTitle">Gap validation</h1>
+        <div class="selectors">
+            <label>Site:</label>
+            <select id="siteSelect"></select>
+            <label>Season:</label>
+            <select id="seasonSelect"></select>
+        </div>
+        <div id="content"></div>
+    </div>
+    <script>
+        let siteName = "innsbruck",
+            season = "2024";
+        let availableSiteSeasons = {};
+        const urlParams = new URLSearchParams(location.search);
+
+        async function probeSummary(sn, s) {
+            try {
+                const res = await fetch(`data/${sn}/${s}/validation/gap_validation_summary.json`, {
+                    method: "HEAD",
+                });
+                return res.ok;
+            } catch {
+                return false;
+            }
+        }
+
+        function fmt(v, d = 4) {
+            if (v == null || typeof v !== "number" || !Number.isFinite(v)) return "—";
+            return v.toFixed(d);
+        }
+
+        function fmtInt(v) {
+            if (v == null || typeof v !== "number" || !Number.isFinite(v)) return "—";
+            return String(Math.round(v));
+        }
+
+        function crossoverBlock(summary) {
+            const scen = summary.scenario;
+            const wcRoot = summary.whittaker_crossover || {};
+            const wc = (scen && wcRoot[scen]) || Object.values(wcRoot)[0];
+            if (!wc) return "";
+            const first = wc.first_gap_days_fusion_nse_below_whittaker;
+            const def = wc.whittaker_definition || "";
+            let h = `<h2>Whittaker crossover (NSE<sub>S2</sub>)</h2>`;
+            h += `<p class="section-note">${def}</p>`;
+            h += `<p class="section-note"><b>First gap length (days)</b> where fusion NSE<sub>S2</sub> &lt; Whittaker NSE<sub>S2</sub> (strict): <b>${first != null ? first : "—"}</b> (none if fusion never falls below).</p>`;
+            const rows = wc.by_gap || [];
+            if (rows.length) {
+                h += `<table><tr><th>Gap days</th><th class="num">NSE<sub>S2</sub> fusion</th><th class="num">NSE<sub>S2</sub> Whittaker</th></tr>`;
+                for (const r of rows) {
+                    h += `<tr><td>${r.gap_days}</td><td class="num">${fmt(r.nse_s2_fusion, 3)}</td><td class="num">${fmt(r.nse_s2_whittaker, 3)}</td></tr>`;
+                }
+                h += `</table>`;
+            }
+            return h;
+        }
+
+        function manifestTable(manifest) {
+            if (!manifest?.entries?.length) return "";
+            let h = `<h2>Gap manifest</h2>`;
+            h += `<p class="section-note">From <code>data/${siteName}/${season}/validation/gap_manifest.json</code>. Midpoint rule: ${manifest.entries[0]?.midpoint_rule || "—"}.</p>`;
+            h += `<table><tr><th>Gap days</th><th>Prediction</th><th>Window</th><th>Withheld S2</th></tr>`;
+            for (const e of manifest.entries) {
+                const w = `${e.window_start} → ${e.window_end}`;
+                h += `<tr><td>${e.gap_days}</td><td>${e.prediction_date}</td><td>${w}</td><td>${e.withheld_s2_filename || "—"}</td></tr>`;
+            }
+            h += `</table>`;
+            return h;
+        }
+
+        function resultsTable(results) {
+            if (!results?.length) return `<p class="empty">No result rows in summary.</p>`;
+            const head = `<tr>
+                <th>Gap</th><th>Prediction</th><th>Withheld REFL</th>
+                <th class="num">RMSE<br><span style="font-weight:normal">gap</span></th>
+                <th class="num">NSE<sub>S2</sub><br><span style="font-weight:normal">gap</span></th>
+                <th class="num">RMSE<br><span style="font-weight:normal">no gap</span></th>
+                <th class="num">NSE<sub>S2</sub><br><span style="font-weight:normal">no gap</span></th>
+                <th class="num">ΔRMSE</th><th class="num">ΔNSE</th>
+                <th class="num">NSE<sub>S2</sub><br><span style="font-weight:normal">Whitt.</span></th>
+                <th class="num">n</th>
+                <th>Paths / error</th>
+            </tr>`;
+            const parts = [head];
+            for (const r of results) {
+                if (r.error) {
+                    parts.push(
+                        `<tr><td>${r.gap_days ?? "—"}</td><td colspan="10" class="err">${r.error}</td><td class="paths">${r.fused_gap_path || ""}</td></tr>`
+                    );
+                    continue;
+                }
+                const g = r.spatial?.gap || {};
+                const ng = r.spatial?.no_gap || {};
+                const wh = r.spatial?.whittaker || {};
+                const dRm = r.spatial?.delta_rmse;
+                const dNs = r.spatial?.delta_nse;
+                const p = r.paths || {};
+                const pathNote = [p.fused_gap, p.fused_no_gap, p.withheld_s2_refl].filter(Boolean).join("<br>");
+                parts.push(`<tr>
+                    <td>${r.gap_days}</td>
+                    <td>${r.prediction_date || "—"}</td>
+                    <td style="font-size:11px">${r.withheld_s2_filename || "—"}</td>
+                    <td class="num">${fmt(g.rmse)}</td>
+                    <td class="num">${fmt(g.nse_s2, 3)}</td>
+                    <td class="num">${fmt(ng.rmse)}</td>
+                    <td class="num">${fmt(ng.nse_s2, 3)}</td>
+                    <td class="num">${fmt(dRm)}</td>
+                    <td class="num">${fmt(dNs, 3)}</td>
+                    <td class="num">${fmt(wh.nse_s2, 3)}</td>
+                    <td class="num">${fmtInt(g.n_pixels)}</td>
+                    <td class="paths">${pathNote}</td>
+                </tr>`);
+            }
+            return `<table>${parts.join("")}</table>`;
+        }
+
+        function metaDetails(summary) {
+            const cmd = summary.command_line;
+            const git = summary.git_commit;
+            if (!cmd && !git) return "";
+            let h = `<details class="meta"><summary>Run metadata</summary>`;
+            if (git) h += `<p>Git: <code>${git}</code></p>`;
+            if (cmd?.length) h += `<pre>${cmd.map((x) => String(x)).join(" ")}</pre>`;
+            h += `</details>`;
+            return h;
+        }
+
+        async function render(summary, manifest) {
+            const el = document.getElementById("content");
+            if (!summary) {
+                el.innerHTML = `<p class="err">Could not load <code>data/${siteName}/${season}/validation/gap_validation_summary.json</code>.</p>
+                    <p class="section-note">From <code>processing/</code>: <code>python -m gap_validation.run --site ${siteName} --season ${season} --lat LAT --lon LON</code> (see <code>--help</code>). Serve from <code>processing/</code>: <code>python3 -m http.server 8000</code> → <code>/webapp/gap_validation.html</code> (<code>webapp/data</code> → <code>../data</code>).</p>`;
+                if (manifest?.entries) el.innerHTML += manifestTable(manifest);
+                return;
+            }
+            const scen = summary.scenario || "—";
+            const sn = summary.site_name ?? siteName;
+            const se = summary.season ?? season;
+            let html = `<div class="intro">
+                Tier-2 withheld S2, spatial GCC vs withheld scene, NSE<sub>S2</sub>, and Whittaker comparison.
+                Summary: <code>data/${sn}/${se}/validation/gap_validation_summary.json</code>.
+                Scenario in this file: <b>${scen}</b> (one run overwrites; re-run CLI for other strategy/σ/mode).
+            </div>`;
+            html += `<h2>Spatial metrics (per gap length)</h2>`;
+            html += `<p class="section-note">Reference = GCC from withheld S2 REFL (bilinear to fusion grid). Prediction = fused GCC. ΔRMSE = RMSE<sub>gap</sub> − RMSE<sub>no gap</sub>; ΔNSE = NSE<sub>no gap</sub> − NSE<sub>gap</sub>.</p>`;
+            html += resultsTable(summary.results);
+            html += crossoverBlock(summary);
+            html += metaDetails(summary);
+            if (manifest?.entries) html += manifestTable(manifest);
+            el.innerHTML = html;
+        }
+
+        async function load() {
+            let summary = null,
+                manifest = null;
+            try {
+                const r1 = await fetch(`data/${siteName}/${season}/validation/gap_validation_summary.json`);
+                summary = r1.ok ? await r1.json() : null;
+            } catch {
+                summary = null;
+            }
+            try {
+                const r2 = await fetch(`data/${siteName}/${season}/validation/gap_manifest.json`);
+                manifest = r2.ok ? await r2.json() : null;
+            } catch {
+                manifest = null;
+            }
+            await render(summary, manifest);
+            const site = window.sitesData?.features?.find((f) => f.properties?.sitename === siteName);
+            document.getElementById("pageTitle").textContent =
+                (site?.properties?.description || siteName) + " — gap validation — " + season;
+            urlParams.set("site", siteName);
+            urlParams.set("season", season);
+            history.replaceState({}, "", `?${urlParams}`);
+        }
+
+        async function init() {
+            try {
+                const res = await fetch("data/sites.geojson");
+                window.sitesData = res.ok ? await res.json() : { features: [] };
+            } catch {
+                window.sitesData = { features: [] };
+            }
+            const features = window.sitesData.features || [];
+            for (const f of features) {
+                const sn = f.properties?.sitename;
+                if (!sn) continue;
+                const seasonsFromGeo = f.properties?.seasons ? Object.keys(f.properties.seasons).sort() : [];
+                const withData = [];
+                for (const s of seasonsFromGeo) {
+                    if (await probeSummary(sn, s)) withData.push(s);
+                }
+                if (withData.length) availableSiteSeasons[sn] = withData;
+            }
+            const availableSites = Object.keys(availableSiteSeasons);
+            const siteSelect = document.getElementById("siteSelect");
+            siteSelect.innerHTML = "";
+            (availableSites.length ? availableSites.sort() : ["innsbruck"]).forEach((sn) => {
+                const opt = document.createElement("option");
+                opt.value = sn;
+                opt.textContent = sn;
+                siteSelect.appendChild(opt);
+                if (!availableSiteSeasons[sn]) availableSiteSeasons[sn] = ["2024"];
+            });
+            const urlSite = urlParams.get("site");
+            const urlSeason = urlParams.get("season");
+            const initialSite = urlSite && availableSiteSeasons[urlSite] ? urlSite : availableSites[0] || "innsbruck";
+            const initialSeason =
+                urlSeason && (availableSiteSeasons[initialSite] || []).includes(urlSeason)
+                    ? urlSeason
+                    : (availableSiteSeasons[initialSite] || [])[0] || "2024";
+            siteSelect.value = initialSite;
+            document.getElementById("seasonSelect").innerHTML = (availableSiteSeasons[initialSite] || [])
+                .map((s) => `<option value="${s}">${s}</option>`)
+                .join("");
+            document.getElementById("seasonSelect").value = initialSeason;
+            siteName = initialSite;
+            season = initialSeason;
+
+            siteSelect.addEventListener("change", function () {
+                const sn = this.value;
+                const seas = availableSiteSeasons[sn] || [];
+                document.getElementById("seasonSelect").innerHTML = seas.map((s) => `<option value="${s}">${s}</option>`).join("");
+                document.getElementById("seasonSelect").value = seas[0] || "2024";
+                siteName = sn;
+                season = document.getElementById("seasonSelect").value;
+                load();
+            });
+            document.getElementById("seasonSelect").addEventListener("change", function () {
+                season = this.value;
+                load();
+            });
+            await load();
+        }
+        init();
+    </script>
+</body>
+</html>

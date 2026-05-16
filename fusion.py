@@ -24,14 +24,20 @@ def run_efast(
     cleaning_strategy="aggressive",
     sigma=None,
     date_range=None,
+    *,
+    s2_output_dir=None,
+    s3_output_dir=None,
+    fusion_output_dir=None,
 ):
     lat, lon = site_position
     datetime_range = date_range or f"{season}-01-01/{season}-12-31"
 
     efast_base_dir = _get_base_dir(season, site_name, cleaning_strategy)
-    s2_output_dir = efast_base_dir / "s2"
-    s3_output_dir = efast_base_dir / "s3"
-    fusion_output_dir = efast_base_dir / (f"fusion_sigma{sigma}" if sigma else "fusion")
+    s2_output_dir = s2_output_dir or (efast_base_dir / "s2")
+    s3_output_dir = s3_output_dir or (efast_base_dir / "s3")
+    fusion_output_dir = fusion_output_dir or (
+        efast_base_dir / (f"fusion_sigma{sigma}" if sigma else "fusion")
+    )
 
     fusion_output_dir.mkdir(parents=True, exist_ok=True)
     print(f"[EFAST] Starting fusion: {site_name} ({lat:.6f}, {lon:.6f}), {season}")
@@ -101,13 +107,19 @@ def run_efast_itb(
     cleaning_strategy="aggressive",
     sigma=None,
     date_range=None,
+    *,
+    s2_output_dir=None,
+    s3_output_dir=None,
+    fusion_output_dir=None,
 ):
     lat, lon = site_position
     datetime_range = date_range or f"{season}-01-01/{season}-12-31"
     efast_base_dir = _get_itb_base_dir(season, site_name, cleaning_strategy)
-    s2_output_dir = efast_base_dir / "s2"
-    s3_output_dir = efast_base_dir / "s3"
-    fusion_output_dir = efast_base_dir / (f"fusion_sigma{sigma}" if sigma else "fusion")
+    s2_output_dir = s2_output_dir or (efast_base_dir / "s2")
+    s3_output_dir = s3_output_dir or (efast_base_dir / "s3")
+    fusion_output_dir = fusion_output_dir or (
+        efast_base_dir / (f"fusion_sigma{sigma}" if sigma else "fusion")
+    )
     fusion_output_dir.mkdir(parents=True, exist_ok=True)
     print(f"[EFAST-ITB] Fusion GCC: {site_name} ({lat:.6f}, {lon:.6f}), {season}")
     efast = _import_efast()

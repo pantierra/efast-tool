@@ -55,6 +55,7 @@
             <a href="fusion.html">Fusion</a>
             <a href="postprocessed.html">Postprocessed</a>
             <a href="metrics.html">Metrics</a>
+            <a href="gap_validation.html">Gap validation</a>
             <a href="phenology.html">Phenology</a>
         </div>
         <div class="slider-container">
@@ -136,7 +137,7 @@
         <div class="combined-plot">
             <div class="combined-plot-label">Metrics vs PhenoCam (fusion scenarios)</div>
             <p style="margin:4px 0 8px; font-size:11px; color:#555; max-width:720px;">
-                R² (variance explained), nRMSE (RMSE normalised by PhenoCam σ), NSE_PC (Nash–Sutcliffe vs PhenoCam). <b>ΔNSE_PC</b> = NSE_PC(σ20)−NSE_PC(σ30): positive → σ20 better; negative → σ30 better. <b>Mean residual</b> (fused−PhenoCam): positive → fusion high vs PhenoCam on average; negative → low; compare BtI vs ItB in the same row (closer to 0 = less mean bias). Tables at the top when <code>metrics.json</code> has <code>derived</code> (regenerate with <code>metrics_stats.py</code> / <code>run.py</code>).
+                <b>R² vs mean</b> (JSON <code>r_squared</code>): generalized R² vs predicting mean PhenoCam each day — same numeric value as <b>NSE_PC</b>, not (Pearson <i>r</i>)²; can be negative. <b>nRMSE</b> (RMSE / mean PhenoCam). <b>ΔNSE_PC</b> = NSE_PC(σ20)−NSE_PC(σ30): positive → σ20 better; negative → σ30 better. <b>Mean residual</b> (fused−PhenoCam): positive → fusion high vs PhenoCam on average; negative → low; compare BtI vs ItB in the same row (closer to 0 = less mean bias). Tables at the top when <code>metrics.json</code> has <code>derived</code> (regenerate with <code>metrics_stats.py</code> / <code>run.py</code>).
             </p>
             <div id="metricsTable" style="overflow-x: auto; margin-top: 10px;"></div>
         </div>
@@ -642,7 +643,7 @@
                 html +=
                     "<p style='margin:0 0 2px; font-size:11px; font-weight:600;'>Mean residual (fused − PhenoCam): BtI vs ItB</p>";
                 html +=
-                    "<p style='margin:0 0 6px; font-size:10px; color:#555; line-height:1.35;'>Each cell: mean(fused−PhenoCam) on matched dates. <b>+</b> overestimates, <b>−</b> underestimates; <b>~0</b> little mean bias (see R²/MAE for overall fit). Same row: column closer to 0 → less systematic offset vs PhenoCam (RQ1.1).</p>";
+                    "<p style='margin:0 0 6px; font-size:10px; color:#555; line-height:1.35;'>Each cell: mean(fused−PhenoCam) on matched dates. <b>+</b> overestimates, <b>−</b> underestimates; <b>~0</b> little mean bias (see R² vs mean / nRMSE / NSE_PC for overall fit). Same row: column closer to 0 → less systematic offset vs PhenoCam (RQ1.1).</p>";
                 html +=
                     "<table style='width:100%; border-collapse:collapse; font-size:11px; margin-bottom:10px;'><thead><tr style='background:#f5f5f5;'><th style='padding:6px;'>Strategy</th><th style='padding:6px;'>σ</th><th style='padding:6px; text-align:right;'>BtI</th><th style='padding:6px; text-align:right;'>ItB</th></tr></thead><tbody>";
                 for (const row of d.bti_vs_itb_mean_residual) {
@@ -654,7 +655,7 @@
             const scenarios = ["aggressive_sigma20", "aggressive_sigma30", "nonaggressive_sigma20", "nonaggressive_sigma30"];
             const scenarioNames = ["Aggressive σ20", "Aggressive σ30", "Non-aggressive σ20", "Non-aggressive σ30"];
             const metrics = ["r_squared", "nrmse", "nse_pc"];
-            const metricLabels = { r_squared: "R²", nrmse: "nRMSE", nse_pc: "NSE_PC" };
+            const metricLabels = { r_squared: "R² vs mean", nrmse: "nRMSE", nse_pc: "NSE_PC" };
 
             html += "<table style='width:100%; border-collapse:collapse; font-size:11px;'>";
             html += "<thead><tr style='background:#f5f5f5; border-bottom:2px solid #ccc;'>";
